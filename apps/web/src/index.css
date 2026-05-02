@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Bulk-SKU-Creator design system. All colors HSL. Calm, operational, trustworthy. */
+
+@layer base {
+  :root {
+    /* Foundation: warm off-white / stone */
+    --background: 40 24% 97%;
+    --foreground: 220 25% 14%;
+
+    /* Panels */
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 14%;
+
+    /* Ink-blue primary accent */
+    --primary: 222 47% 24%;
+    --primary-foreground: 40 24% 97%;
+    --primary-hover: 222 47% 18%;
+
+    /* Muted neutrals */
+    --secondary: 35 18% 94%;
+    --secondary-foreground: 220 25% 18%;
+
+    --muted: 35 16% 93%;
+    --muted-foreground: 220 12% 42%;
+
+    --accent: 35 20% 90%;
+    --accent-foreground: 220 25% 14%;
+
+    /* Semantic status colors (restrained) */
+    --status-ready: 152 38% 36%;
+    --status-ready-bg: 152 40% 94%;
+    --status-ready-border: 152 30% 80%;
+
+    --status-augmented: 192 52% 36%;
+    --status-augmented-bg: 192 50% 94%;
+    --status-augmented-border: 192 40% 80%;
+
+    --status-needs-input: 38 78% 42%;
+    --status-needs-input-bg: 40 80% 94%;
+    --status-needs-input-border: 38 60% 78%;
+
+    --status-blocked: 12 70% 46%;
+    --status-blocked-bg: 14 75% 95%;
+    --status-blocked-border: 14 50% 82%;
+
+    --status-submitted: 222 47% 32%;
+    --status-submitted-bg: 222 35% 94%;
+    --status-submitted-border: 222 30% 82%;
+
+    --status-neutral: 220 12% 42%;
+    --status-neutral-bg: 220 14% 94%;
+    --status-neutral-border: 220 14% 84%;
+
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 40 24% 97%;
+
+    --border: 30 14% 86%;
+    --border-strong: 30 12% 76%;
+    --input: 30 14% 86%;
+    --ring: 222 47% 32%;
+
+    --radius: 0.375rem;
+
+    /* Sidebar */
+    --sidebar-background: 222 30% 16%;
+    --sidebar-foreground: 35 18% 88%;
+    --sidebar-primary: 192 52% 56%;
+    --sidebar-primary-foreground: 222 47% 12%;
+    --sidebar-accent: 222 28% 22%;
+    --sidebar-accent-foreground: 40 24% 97%;
+    --sidebar-border: 222 24% 24%;
+    --sidebar-ring: 192 52% 56%;
+  }
+
+  .dark {
+    --background: 222 30% 10%;
+    --foreground: 35 18% 92%;
+    --card: 222 28% 13%;
+    --card-foreground: 35 18% 92%;
+    --popover: 222 28% 13%;
+    --popover-foreground: 35 18% 92%;
+    --primary: 192 52% 56%;
+    --primary-foreground: 222 47% 12%;
+    --secondary: 222 24% 18%;
+    --secondary-foreground: 35 18% 92%;
+    --muted: 222 24% 18%;
+    --muted-foreground: 35 10% 64%;
+    --accent: 222 24% 22%;
+    --accent-foreground: 35 18% 92%;
+    --border: 222 20% 22%;
+    --input: 222 20% 22%;
+    --ring: 192 52% 56%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+  }
+  html { font-family: ui-sans-serif, system-ui, -apple-system, "Inter", "Segoe UI", sans-serif; }
+}
+
+@layer components {
+  .panel {
+    @apply bg-card border border-border rounded-md;
+  }
+  .panel-strong {
+    @apply bg-card border border-border-strong rounded-md;
+  }
+  .label-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    @apply text-[11px] uppercase tracking-wider text-muted-foreground;
+  }
+  .data-cell {
+    @apply text-sm text-foreground tabular-nums;
+  }
+  .divider-soft {
+    @apply border-t border-border;
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "bulk-sku-creator",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @bulk-sku-creator/web",
+    "build:web": "npm run build --workspace @bulk-sku-creator/web",
+    "lint:web": "npm run lint --workspace @bulk-sku-creator/web",
+    "test:web": "npm run test --workspace @bulk-sku-creator/web"
+  }
+}

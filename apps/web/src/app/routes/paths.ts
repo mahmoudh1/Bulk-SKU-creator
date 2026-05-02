@@ -1,0 +1,33 @@
+export const appPaths = {
+  home: "/",
+  auth: "/auth",
+  workspace: "/workspace",
+  dashboard: "/dashboard",
+  batches: "/batches",
+  createBatch: "/batches/new",
+  batchMapping: (batchId: string) => `/batches/${batchId}/mapping`,
+  batchReview: (batchId: string) => `/batches/${batchId}/review`,
+  batchRow: (batchId: string, rowId: string) => `/batches/${batchId}/rows/${rowId}`,
+  batchAiReview: (batchId: string) => `/batches/${batchId}/ai-review`,
+  batchImages: (batchId: string) => `/batches/${batchId}/images`,
+  batchSubmit: (batchId: string) => `/batches/${batchId}/submit`,
+  submissions: "/submissions",
+  submissionFailures: "/submissions/failures",
+  sellerDefaults: "/settings/defaults",
+  savedViews: "/settings/views",
+  support: "/support",
+  admin: "/admin",
+  states: "/states",
+  mobile: "/mobile",
+  reviewHub: "/review",
+  reviewRowsHub: "/review/rows",
+  reviewAiHub: "/review/ai",
+  reviewImagesHub: "/review/images",
+} as const;
+
+export const reviewEntryPaths = [
+  appPaths.reviewHub,
+  appPaths.reviewRowsHub,
+  appPaths.reviewAiHub,
+  appPaths.reviewImagesHub,
+] as const;
