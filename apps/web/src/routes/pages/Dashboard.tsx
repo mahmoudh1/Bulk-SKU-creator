@@ -37,7 +37,7 @@ const activity = [
 
 export default function Dashboard() {
   return (
-    <AppShell breadcrumbs={<span><span className="text-foreground/80">Hearth & Loom Trading</span> · Dashboard</span>}>
+    <AppShell breadcrumbs="Dashboard">
       <div className="px-6 py-6 max-w-[1400px]">
         <div className="flex items-end justify-between mb-6">
           <div>

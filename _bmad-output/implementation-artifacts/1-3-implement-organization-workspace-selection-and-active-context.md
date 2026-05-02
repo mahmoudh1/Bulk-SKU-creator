@@ -1,6 +1,6 @@
 # Story 1.3: Implement Organization Workspace Selection and Active Context
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -18,30 +18,30 @@ so that the application consistently uses the correct organization context.
 
 ## Tasks / Subtasks
 
-- [ ] Implement active-organization context wiring on top of Clerk auth (AC: 1, 2)
-  - [ ] Use Clerk Organizations hooks/components to access active organization and memberships.
-  - [ ] Introduce an app-level organization context seam that later stories can consume.
-  - [ ] Keep org context separate from backend data loading for now.
+- [x] Implement active-organization context wiring on top of Clerk auth (AC: 1, 2)
+  - [x] Use Clerk Organizations hooks/components to access active organization and memberships.
+  - [x] Introduce an app-level organization context seam that later stories can consume.
+  - [x] Keep org context separate from backend data loading for now.
 
-- [ ] Replace prototype workspace-selection behavior with real org selection (AC: 1, 3)
-  - [ ] Remove the current fake workspace cards that all route to `/dashboard`.
-  - [ ] Make workspace selection derive from actual authenticated organization membership state.
-  - [ ] Support the single-org path without maintaining a fake intermediate screen where not needed.
+- [x] Replace prototype workspace-selection behavior with real org selection (AC: 1, 3)
+  - [x] Remove the current fake workspace cards that all route to `/dashboard`.
+  - [x] Make workspace selection derive from actual authenticated organization membership state.
+  - [x] Support the single-org path without maintaining a fake intermediate screen where not needed.
 
-- [ ] Surface active organization in the shared shell (AC: 2)
-  - [ ] Make the shell header/sidebar show the current workspace context.
-  - [ ] Prepare shared shell seams for later organization-aware navigation and data loading.
-  - [ ] Ensure no hardcoded organization display strings remain as authoritative workspace state.
+- [x] Surface active organization in the shared shell (AC: 2)
+  - [x] Make the shell header/sidebar show the current workspace context.
+  - [x] Prepare shared shell seams for later organization-aware navigation and data loading.
+  - [x] Ensure no hardcoded organization display strings remain as authoritative workspace state.
 
-- [ ] Persist and restore active workspace context safely (AC: 1, 3)
-  - [ ] Ensure refresh/navigation does not drop the selected active organization unexpectedly.
-  - [ ] Keep route/session behavior predictable when the active organization changes.
-  - [ ] Preserve compatibility with later protected-route and role-aware stories.
+- [x] Persist and restore active workspace context safely (AC: 1, 3)
+  - [x] Ensure refresh/navigation does not drop the selected active organization unexpectedly.
+  - [x] Keep route/session behavior predictable when the active organization changes.
+  - [x] Preserve compatibility with later protected-route and role-aware stories.
 
-- [ ] Validate organization-entry flows (AC: 1, 2, 3)
-  - [ ] Multi-organization user flow
-  - [ ] Single-organization user flow
-  - [ ] No-active-organization or unresolved-state flow
+- [x] Validate organization-entry flows (AC: 1, 2, 3)
+  - [x] Multi-organization user flow
+  - [x] Single-organization user flow
+  - [x] No-active-organization or unresolved-state flow
 
 ## Dev Notes
 
@@ -136,11 +136,31 @@ gpt-5
 ### Debug Log References
 
 - No git repository detected at repo root during story generation.
+- Local test environment required fixing executable flags for node_modules binaries and running npm install to restore missing optional dependencies (rollup native).
 
 ### Completion Notes List
 
-- To be filled by dev agent during implementation
+- Implemented app-level org context seam backed by Clerk Organizations hooks and consumed by shell + route boundary.
+- Replaced workspace selector mock data with real organization membership-driven selection that sets active org and returns to intended route.
+- Added OrganizationBoundary to enforce an active org for org-scoped routes (auto-select single org, redirect multi-org to selector, handle no-org state).
+- Updated shell header/sidebar to render active workspace and removed hardcoded workspace identity in shell defaults.
+- Added tests for workspace selection + routing guard behavior.
+- Verified: `npm run test:web`, `npm run lint:web`.
 
 ### File List
 
-- To be filled by dev agent during implementation
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- apps/web/src/app/organizations/OrganizationProvider.tsx
+- apps/web/src/app/providers/AppProviders.tsx
+- apps/web/src/app/routes/OrganizationBoundary.tsx
+- apps/web/src/app/routes/route-config.tsx
+- apps/web/src/components/shell/AppShell.tsx
+- apps/web/src/components/shell/AppSidebar.tsx
+- apps/web/src/routes/pages/Dashboard.tsx
+- apps/web/src/routes/pages/WorkspaceSelect.tsx
+- apps/web/src/test/app-routing.test.tsx
+- apps/web/src/test/workspace-selection.test.tsx
+
+### Change Log
+
+- 2026-05-02: Implemented Clerk Organizations-backed workspace context + selection flow and added routing guard + tests.
