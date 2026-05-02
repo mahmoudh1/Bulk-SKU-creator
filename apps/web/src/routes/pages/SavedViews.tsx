@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 
 import { appPaths } from "@/app/routes/paths";
-import { AppShell } from "@/components/AppShell";
 import { prototypeBatchId } from "@/lib/mocks/route-defaults";
 import { Bookmark, Plus, Copy, Edit2, Trash2 } from "lucide-react";
 
@@ -15,8 +14,7 @@ const views = [
 
 export default function SavedViews() {
   return (
-    <AppShell breadcrumbs={<span><Link to="/dashboard" className="hover:underline">Dashboard</Link> · Settings · Saved views</span>}>
-      <div className="px-6 py-5 max-w-[1100px]">
+    <div className="px-6 py-5 max-w-[1100px]">
         <div className="flex items-end justify-between mb-5">
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2"><Bookmark className="h-5 w-5 text-primary"/>Saved views</h1>
@@ -71,6 +69,5 @@ export default function SavedViews() {
           </table>
         </div>
       </div>
-    </AppShell>
   );
 }

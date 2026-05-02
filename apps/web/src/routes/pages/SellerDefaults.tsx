@@ -1,5 +1,3 @@
-import { Link } from "react-router-dom";
-import { AppShell } from "@/components/AppShell";
 import { Save, History } from "lucide-react";
 
 function Field({ label, hint, children }: any) {
@@ -29,8 +27,7 @@ const Select = ({ children, ...p }: any) => <select {...p} className="w-full max
 
 export default function SellerDefaults() {
   return (
-    <AppShell breadcrumbs={<span><Link to="/dashboard" className="hover:underline">Dashboard</Link> · Settings · Seller defaults</span>}>
-      <div className="px-6 py-5 max-w-[1280px]">
+    <div className="px-6 py-5 max-w-[1280px]">
         <div className="flex items-end justify-between mb-5">
           <div>
             <h1 className="text-xl font-semibold">Seller defaults</h1>
@@ -98,7 +95,6 @@ export default function SellerDefaults() {
             </ul>
           </aside>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

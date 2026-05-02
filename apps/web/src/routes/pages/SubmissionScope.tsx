@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 
-import { AppShell } from "@/components/AppShell";
+import { appPaths } from "@/app/routes/paths";
 import { StatusChip } from "@/components/StatusChip";
 import { rows } from "@/data/mock";
 import { prototypeBatchId } from "@/lib/mocks/route-defaults";
@@ -12,8 +12,7 @@ export default function SubmissionScope() {
   const excluded = rows.filter((r) => r.status === "BLOCKED_FOR_REVIEW" || r.status === "NOT_ENOUGH_DATA" || r.status === "NEEDS_INPUT");
 
   return (
-    <AppShell breadcrumbs={<span><Link to={`/batches/${id}/review`} className="hover:underline">AW25 Wave 3</Link> · Submission scope</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="label-mono">Step 3 of 3</div>
@@ -21,7 +20,7 @@ export default function SubmissionScope() {
             <p className="text-sm text-muted-foreground mt-1">Review the exact scope being sent to Amazon.eg. Excluded rows remain in the batch and can be resolved later.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to={`/batches/${id}/review`} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5"><ArrowLeft className="h-4 w-4"/>Back to review</Link>
+            <Link to={appPaths.batchReview(id)} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5"><ArrowLeft className="h-4 w-4"/>Back to review</Link>
           </div>
         </div>
 
@@ -102,14 +101,13 @@ export default function SubmissionScope() {
               I confirm 193 rows for submission to Amazon.eg
             </label>
             <div className="flex items-center gap-2">
-              <Link to={`/batches/${id}/review`} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted">Back to review</Link>
-              <Link to="/submissions" className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5">
+              <Link to={appPaths.batchReview(id)} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted">Back to review</Link>
+              <Link to={appPaths.submissions} className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5">
                 <Send className="h-4 w-4" /> Confirm submission
               </Link>
             </div>
           </div>
         </section>
       </div>
-    </AppShell>
   );
 }

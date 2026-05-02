@@ -17,6 +17,7 @@ import {
   Upload,
 } from "lucide-react";
 
+import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
 import { appPaths } from "@/app/routes/paths";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -98,6 +99,7 @@ function Section({ label, items }: { label: string; items: NavigationItem[] }) {
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
+  const { activeWorkspace } = useOrganizationContext();
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -110,7 +112,7 @@ export function AppSidebar() {
             {!collapsed ? (
               <div className="flex flex-col leading-tight">
                 <span className="text-sm font-semibold text-sidebar-accent-foreground">Bulk-SKU-Creator</span>
-                <span className="text-[11px] text-sidebar-foreground/60">Hearth &amp; Loom · Amazon.eg</span>
+                <span className="text-[11px] text-sidebar-foreground/60">{activeWorkspace?.name ?? "Workspace"}</span>
               </div>
             ) : null}
           </div>

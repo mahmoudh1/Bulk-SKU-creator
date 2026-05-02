@@ -1,6 +1,5 @@
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
-import { AppShell } from "@/components/AppShell";
 import { prototypeAiBatchId } from "@/lib/mocks/route-defaults";
 import { Sparkles, AlertCircle, CheckCircle2, XCircle, ChevronRight, ShieldAlert } from "lucide-react";
 
@@ -15,8 +14,7 @@ const queue = [
 export default function AIReview() {
   const { id = prototypeAiBatchId } = useParams();
   return (
-    <AppShell breadcrumbs={<span><Link to={`/batches/${id}/review`} className="hover:underline">AW25 Wave 3</Link> · AI review</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="mb-5">
           <h1 className="text-xl font-semibold flex items-center gap-2"><Sparkles className="h-5 w-5 text-status-augmented" /> AI augmentation review</h1>
           <p className="text-sm text-muted-foreground mt-1">Inspect what the AI changed. Accept only if the suggestion is consistent with source-verified facts.</p>
@@ -115,7 +113,6 @@ export default function AIReview() {
             </div>
           </section>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

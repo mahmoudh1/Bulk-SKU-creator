@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 
-import { AppShell } from "@/components/AppShell";
+import { appPaths } from "@/app/routes/paths";
 import { StatusChip } from "@/components/StatusChip";
 import { rows } from "@/data/mock";
 import { prototypeBatchId, prototypeRowId } from "@/lib/mocks/route-defaults";
@@ -11,13 +11,12 @@ export default function RowInspector() {
   const row = rows.find((r) => r.id === rowId) ?? rows.find((r) => r.id === prototypeRowId) ?? rows[0];
 
   return (
-    <AppShell breadcrumbs={<span><Link to={`/batches/${id}/review`} className="hover:underline">AW25 Wave 3</Link> · Row inspector</span>}>
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] min-h-[calc(100vh-3rem)]">
+    <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] min-h-[calc(100vh-3rem)]">
         <div className="min-w-0">
           {/* Row header */}
           <div className="px-6 pt-5 pb-4 border-b border-border bg-card/40">
             <div className="flex items-center justify-between gap-3 mb-2">
-              <Link to={`/batches/${id}/review`} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+              <Link to={appPaths.batchReview(id)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
                 <ArrowLeft className="h-3.5 w-3.5" /> Back to triage
               </Link>
               <div className="flex items-center gap-1">
@@ -144,7 +143,7 @@ export default function RowInspector() {
             <section className="panel">
               <header className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h2 className="text-sm font-semibold flex items-center gap-2"><ImageIcon className="h-4 w-4 text-muted-foreground" />Image plan</h2>
-                <Link to={`/batches/${id}/images`} className="text-xs text-primary hover:underline">Open image plan →</Link>
+                <Link to={appPaths.batchImages(id)} className="text-xs text-primary hover:underline">Open image plan →</Link>
               </header>
               <div className="p-4 grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {[1,2,3,4].map((i) => (
@@ -210,6 +209,5 @@ export default function RowInspector() {
           </div>
         </aside>
       </div>
-    </AppShell>
   );
 }

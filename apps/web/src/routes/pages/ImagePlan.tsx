@@ -1,6 +1,5 @@
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
-import { AppShell } from "@/components/AppShell";
 import { prototypeBatchId } from "@/lib/mocks/route-defaults";
 import { CheckCircle2, AlertCircle, ImageIcon, ShieldCheck, RotateCw, Replace, EyeOff } from "lucide-react";
 
@@ -22,8 +21,7 @@ const tone = (s: string) =>
 export default function ImagePlan() {
   const { id = prototypeBatchId } = useParams();
   return (
-    <AppShell breadcrumbs={<span><Link to={`/batches/${id}/review`} className="hover:underline">AW25 Wave 3</Link> · Image plan</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="flex items-end justify-between mb-5">
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2"><ImageIcon className="h-5 w-5 text-primary" /> Image plan · r_88123</h1>
@@ -90,7 +88,6 @@ export default function ImagePlan() {
             </section>
           </aside>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 # Story 1.5: Establish Frontend Quality Guardrails and Smoke Coverage
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -18,30 +18,30 @@ so that later feature work does not compound instability in the product shell.
 
 ## Tasks / Subtasks
 
-- [ ] Replace placeholder-only tests with meaningful smoke coverage (AC: 1)
-  - [ ] Add route-render or integration-style coverage for auth entry.
-  - [ ] Add flow coverage for workspace selection / active org handoff.
-  - [ ] Add shell-render coverage for signed-in protected app state.
+- [x] Replace placeholder-only tests with meaningful smoke coverage (AC: 1)
+  - [x] Add route-render or integration-style coverage for auth entry.
+  - [x] Add flow coverage for workspace selection / active org handoff.
+  - [x] Add shell-render coverage for signed-in protected app state.
 
-- [ ] Make lint and baseline quality checks part of the working contract (AC: 2)
-  - [ ] Ensure lint is clean or intentionally scoped for the canonical frontend target.
-  - [ ] Document or wire the expected local quality commands.
-  - [ ] Cover obvious regressions around protected routes and shell rendering.
+- [x] Make lint and baseline quality checks part of the working contract (AC: 2)
+  - [x] Ensure lint is clean or intentionally scoped for the canonical frontend target.
+  - [x] Document or wire the expected local quality commands.
+  - [x] Cover obvious regressions around protected routes and shell rendering.
 
-- [ ] Add practical accessibility and UI-safety checks where they fit the smoke layer (AC: 1, 2)
-  - [ ] Verify focus-safe shell/auth/workspace render paths.
-  - [ ] Ensure no regressions reintroduce purely visual-only protected behavior.
-  - [ ] Keep checks lightweight enough for routine use.
+- [x] Add practical accessibility and UI-safety checks where they fit the smoke layer (AC: 1, 2)
+  - [x] Verify focus-safe shell/auth/workspace render paths.
+  - [x] Ensure no regressions reintroduce purely visual-only protected behavior.
+  - [x] Keep checks lightweight enough for routine use.
 
-- [ ] Apply easy route-level performance wins (AC: 3)
-  - [ ] Introduce code splitting or lazy route loading where it is low risk and clearly beneficial.
-  - [ ] Avoid destabilizing provider composition or route guards.
-  - [ ] Document any larger performance work that should stay deferred.
+- [x] Apply easy route-level performance wins (AC: 3)
+  - [x] Introduce code splitting or lazy route loading where it is low risk and clearly beneficial.
+  - [x] Avoid destabilizing provider composition or route guards.
+  - [x] Document any larger performance work that should stay deferred.
 
-- [ ] Validate the quality baseline (AC: 1, 2, 3)
-  - [ ] Tests run locally
-  - [ ] lint runs locally
-  - [ ] canonical shell still builds and renders
+- [x] Validate the quality baseline (AC: 1, 2, 3)
+  - [x] Tests run locally
+  - [x] lint runs locally
+  - [x] canonical shell still builds and renders
 
 ## Dev Notes
 
@@ -136,11 +136,26 @@ gpt-5
 ### Debug Log References
 
 - No git repository detected at repo root during story generation.
+- Converted placeholder-only tests into auth/workspace/shell smoke coverage and added a lightweight accessibility smoke layer.
 
 ### Completion Notes List
 
-- To be filled by dev agent during implementation
+- Replaced placeholder-only test coverage with smoke-level auth entry, workspace selection, and shared shell navigation tests.
+- Added lightweight UI-safety checks asserting explicit status text during workspace resolution and ensuring auth surface includes accessible affordances.
+- Introduced low-risk route-level code splitting by lazy-loading non-entry route components behind Suspense.
+- Documented baseline quality commands in the web README.
+- Verified: `npm run test:web`, `npm run lint:web`.
 
 ### File List
 
-- To be filled by dev agent during implementation
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- apps/web/README.md
+- apps/web/src/app/routes/route-config.tsx
+- apps/web/src/test/a11y-smoke.test.tsx
+- apps/web/src/test/app-routing.test.tsx
+- apps/web/src/test/shell-navigation.test.tsx
+- apps/web/src/test/workspace-selection.test.tsx
+
+### Change Log
+
+- 2026-05-02: Established frontend smoke coverage + lint baseline and introduced low-risk route-level code splitting.

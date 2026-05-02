@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { AppShell } from "@/components/AppShell";
+
+import { appPaths } from "@/app/routes/paths";
 import { SubmissionChip } from "@/components/StatusChip";
 import { submissionEvents, rows } from "@/data/mock";
 import { CheckCircle2, AlertCircle, AlertOctagon, RotateCw, Clock } from "lucide-react";
@@ -23,8 +24,7 @@ const lvl: Record<string, string> = {
 
 export default function SubmissionMonitor() {
   return (
-    <AppShell breadcrumbs={<span><Link to="/batches" className="hover:underline">Batches</Link> · AW25 Wave 3 · Submission</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="flex items-end justify-between mb-5">
           <div>
             <h1 className="text-xl font-semibold">Submission monitor</h1>
@@ -84,7 +84,7 @@ export default function SubmissionMonitor() {
             </div>
             <div className="px-4 py-3 border-t border-border bg-muted/30 flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Auto-refresh every 15s · last update just now</span>
-              <Link to="/submissions/failures" className="text-primary hover:underline">Open failure recovery →</Link>
+              <Link to={appPaths.submissionFailures} className="text-primary hover:underline">Open failure recovery →</Link>
             </div>
           </section>
 
@@ -104,6 +104,5 @@ export default function SubmissionMonitor() {
           </aside>
         </div>
       </div>
-    </AppShell>
   );
 }

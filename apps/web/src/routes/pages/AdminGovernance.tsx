@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { AppShell } from "@/components/AppShell";
+
+import { appPaths } from "@/app/routes/paths";
 import { TrendingUp, AlertOctagon, ShieldCheck, Settings, ArrowRight } from "lucide-react";
 
 const blockers = [
@@ -26,8 +27,7 @@ const audit = [
 
 export default function AdminGovernance() {
   return (
-    <AppShell breadcrumbs={<span><Link to="/dashboard" className="hover:underline">Dashboard</Link> · Admin & governance</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="mb-5">
           <h1 className="text-xl font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/>Admin & governance</h1>
           <p className="text-sm text-muted-foreground mt-1">Where the team is losing time, and what configuration is enforcing quality.</p>
@@ -106,7 +106,9 @@ export default function AdminGovernance() {
           <section className="panel">
             <header className="px-4 py-3 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold flex items-center gap-2"><Settings className="h-4 w-4"/>Recent config & escalations</h2>
-              <Link to="/settings/defaults" className="text-xs text-primary hover:underline inline-flex items-center gap-0.5">Manage defaults <ArrowRight className="h-3 w-3"/></Link>
+              <Link to={appPaths.sellerDefaults} className="text-xs text-primary hover:underline inline-flex items-center gap-0.5">
+                Manage defaults <ArrowRight className="h-3 w-3" />
+              </Link>
             </header>
             <ol className="divide-y divide-border text-sm">
               {audit.map((a, i) => (
@@ -118,7 +120,6 @@ export default function AdminGovernance() {
             </ol>
           </section>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

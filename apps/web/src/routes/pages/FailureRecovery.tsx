@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 
 import { appPaths } from "@/app/routes/paths";
-import { AppShell } from "@/components/AppShell";
 import { prototypeBatchId } from "@/lib/mocks/route-defaults";
 import { AlertOctagon, RotateCw, ExternalLink, Wrench } from "lucide-react";
 
@@ -14,8 +13,7 @@ const failed = [
 
 export default function FailureRecovery() {
   return (
-    <AppShell breadcrumbs={<span><Link to="/submissions" className="hover:underline">Submission monitor</Link> · Failure recovery</span>}>
-      <div className="px-6 py-5 max-w-[1400px]">
+    <div className="px-6 py-5 max-w-[1400px]">
         <div className="flex items-end justify-between mb-5">
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2"><AlertOctagon className="h-5 w-5 text-status-blocked"/>Failure recovery</h1>
@@ -91,7 +89,6 @@ required: >=1000x1000`}</code></pre>
             </div>
           </aside>
         </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }
