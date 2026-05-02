@@ -1,5 +1,3 @@
-import { Link } from "react-router-dom";
-import { AppShell } from "@/components/AppShell";
 import { Search, AlertOctagon, FileSearch, MessageSquare } from "lucide-react";
 
 const cases = [
@@ -17,8 +15,7 @@ const sevCls: Record<string, string> = {
 
 export default function SupportInvestigation() {
   return (
-    <AppShell breadcrumbs={<span>Support · Investigations</span>}>
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] min-h-[calc(100vh-3rem)]">
+    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_360px] min-h-[calc(100vh-3rem)]">
         {/* Left: cases */}
         <aside className="border-r border-border bg-card/40 flex flex-col">
           <div className="p-3 border-b border-border">
@@ -130,6 +127,5 @@ amazon_response: {
           </div>
         </aside>
       </div>
-    </AppShell>
   );
 }

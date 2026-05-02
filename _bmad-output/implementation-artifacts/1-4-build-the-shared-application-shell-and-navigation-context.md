@@ -1,6 +1,6 @@
 # Story 1.4: Build the Shared Application Shell and Navigation Context
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -18,30 +18,30 @@ so that I can move through the product consistently as deeper features are added
 
 ## Tasks / Subtasks
 
-- [ ] Stabilize the shell layout as the canonical app frame (AC: 1)
-  - [ ] Make the canonical shell route/layout the shared frame for protected product screens.
-  - [ ] Preserve the generated visual direction and desktop-first density.
-  - [ ] Ensure org context is surfaced in header/sidebar locations consistently.
+- [x] Stabilize the shell layout as the canonical app frame (AC: 1)
+  - [x] Make the canonical shell route/layout the shared frame for protected product screens.
+  - [x] Preserve the generated visual direction and desktop-first density.
+  - [x] Ensure org context is surfaced in header/sidebar locations consistently.
 
-- [ ] Remove shell-level demo assumptions from navigation (AC: 2)
-  - [ ] Replace hardcoded batch/row demo navigation links in shared sidebar behavior.
-  - [ ] Keep navigation focused on real route areas, not preselected entity instances.
-  - [ ] Preserve room for later context-aware deep links without binding the shell to fake IDs.
+- [x] Remove shell-level demo assumptions from navigation (AC: 2)
+  - [x] Replace hardcoded batch/row demo navigation links in shared sidebar behavior.
+  - [x] Keep navigation focused on real route areas, not preselected entity instances.
+  - [x] Preserve room for later context-aware deep links without binding the shell to fake IDs.
 
-- [ ] Create stable provider and app-context boundaries (AC: 3)
-  - [ ] Separate shell providers from feature/page content.
-  - [ ] Expose shared boundaries for auth context, active organization, and TanStack Query.
-  - [ ] Ensure later feature stories can mount into the shell without moving app root logic again.
+- [x] Create stable provider and app-context boundaries (AC: 3)
+  - [x] Separate shell providers from feature/page content.
+  - [x] Expose shared boundaries for auth context, active organization, and TanStack Query.
+  - [x] Ensure later feature stories can mount into the shell without moving app root logic again.
 
-- [ ] Normalize route-area structure and breadcrumbs/context (AC: 1, 2, 3)
-  - [ ] Organize route groups around batches, defaults, support, admin, and utility areas.
-  - [ ] Replace placeholder shell breadcrumb/search context strings where they currently imply fake product state.
-  - [ ] Preserve UX consistency for navigation hierarchy and action emphasis.
+- [x] Normalize route-area structure and breadcrumbs/context (AC: 1, 2, 3)
+  - [x] Organize route groups around batches, defaults, support, admin, and utility areas.
+  - [x] Replace placeholder shell breadcrumb/search context strings where they currently imply fake product state.
+  - [x] Preserve UX consistency for navigation hierarchy and action emphasis.
 
-- [ ] Validate shell behavior (AC: 1, 2, 3)
-  - [ ] Signed-in user with active org
-  - [ ] route transitions across major areas
-  - [ ] shell rendering without hardcoded entity state
+- [x] Validate shell behavior (AC: 1, 2, 3)
+  - [x] Signed-in user with active org
+  - [x] route transitions across major areas
+  - [x] shell rendering without hardcoded entity state
 
 ## Dev Notes
 
@@ -137,11 +137,38 @@ gpt-5
 ### Debug Log References
 
 - No git repository detected at repo root during story generation.
+- Multiple TSX pages contained redundant shell wrappers and breadcrumb demo strings; refactor introduced JSX nesting issues that were resolved during test runs.
 
 ### Completion Notes List
 
-- To be filled by dev agent during implementation
+- Centralized the canonical protected-shell layout as a route-level wrapper and removed per-page shell wrappers.
+- Added route-driven breadcrumbs via a single layout resolver, eliminating demo breadcrumb strings that implied fake product state.
+- Kept shared navigation focused on route areas (batches/settings/support/admin) and verified shared nav remains free of entity deep links.
+- Verified: `npm run test:web`, `npm run lint:web`.
 
 ### File List
 
-- To be filled by dev agent during implementation
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- apps/web/src/app/layouts/AppShellLayout.tsx
+- apps/web/src/app/routes/route-config.tsx
+- apps/web/src/routes/pages/AdminGovernance.tsx
+- apps/web/src/routes/pages/AIReview.tsx
+- apps/web/src/routes/pages/BatchesList.tsx
+- apps/web/src/routes/pages/CreateBatch.tsx
+- apps/web/src/routes/pages/Dashboard.tsx
+- apps/web/src/routes/pages/FailureRecovery.tsx
+- apps/web/src/routes/pages/ImagePlan.tsx
+- apps/web/src/routes/pages/IntakeMapping.tsx
+- apps/web/src/routes/pages/RowInspector.tsx
+- apps/web/src/routes/pages/SavedViews.tsx
+- apps/web/src/routes/pages/SellerDefaults.tsx
+- apps/web/src/routes/pages/StatesShowcase.tsx
+- apps/web/src/routes/pages/SubmissionMonitor.tsx
+- apps/web/src/routes/pages/SubmissionScope.tsx
+- apps/web/src/routes/pages/SupportInvestigation.tsx
+- apps/web/src/routes/pages/TriageWorkspace.tsx
+- apps/web/src/test/shell-navigation.test.tsx
+
+### Change Log
+
+- 2026-05-02: Introduced route-level shell layout with breadcrumb resolver, refactored pages to render inside the shared shell, and added shell navigation smoke tests.

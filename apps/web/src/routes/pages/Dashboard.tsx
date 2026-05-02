@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 
 import { appPaths } from "@/app/routes/paths";
-import { AppShell } from "@/components/AppShell";
 import { StatusChip, SubmissionChip } from "@/components/StatusChip";
 import { batches } from "@/data/mock";
 import { prototypeAiBatchId, prototypeBatchId } from "@/lib/mocks/route-defaults";
@@ -37,16 +36,20 @@ const activity = [
 
 export default function Dashboard() {
   return (
-    <AppShell breadcrumbs="Dashboard">
-      <div className="px-6 py-6 max-w-[1400px]">
+    <div className="px-6 py-6 max-w-[1400px]">
         <div className="flex items-end justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-foreground">Operational overview</h1>
             <p className="text-sm text-muted-foreground mt-1">Tuesday, 22 Apr 2026 · 8 batches in progress · 1 submission live</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/batches" className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted">Resume batch</Link>
-            <Link to="/batches/new" className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5">
+            <Link to={appPaths.batches} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted">
+              Resume batch
+            </Link>
+            <Link
+              to={appPaths.createBatch}
+              className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5"
+            >
               <Plus className="h-4 w-4" /> Create batch
             </Link>
           </div>
@@ -96,7 +99,9 @@ export default function Dashboard() {
             <section className="panel">
               <header className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <h2 className="text-sm font-semibold">Recent batches</h2>
-                <Link to="/batches" className="text-xs text-primary hover:underline">View all</Link>
+                <Link to={appPaths.batches} className="text-xs text-primary hover:underline">
+                  View all
+                </Link>
               </header>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -114,7 +119,9 @@ export default function Dashboard() {
                     {batches.slice(0, 5).map((b) => (
                       <tr key={b.id} className="hover:bg-muted/40">
                         <td className="px-4 py-2.5">
-                          <Link to={`/batches/${b.id}/review`} className="font-medium text-foreground hover:underline">{b.name}</Link>
+                          <Link to={appPaths.batchReview(b.id)} className="font-medium text-foreground hover:underline">
+                            {b.name}
+                          </Link>
                           <div className="text-xs text-muted-foreground">{b.owner} · {b.marketplace}</div>
                         </td>
                         <td className="px-2 py-2.5 tabular-nums">{b.totalRows}</td>
@@ -177,6 +184,5 @@ export default function Dashboard() {
           </aside>
         </div>
       </div>
-    </AppShell>
   );
 }

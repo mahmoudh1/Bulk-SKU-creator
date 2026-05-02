@@ -1,7 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { useState } from "react";
 
-import { AppShell } from "@/components/AppShell";
+import { appPaths } from "@/app/routes/paths";
 import { StatusChip, SubmissionChip } from "@/components/StatusChip";
 import { rows, batches } from "@/data/mock";
 import { prototypeBatchId, prototypeRowId } from "@/lib/mocks/route-defaults";
@@ -29,8 +29,7 @@ export default function TriageWorkspace() {
   const [selected, setSelected] = useState(rows.find((row) => row.id === prototypeRowId) ?? rows[0]);
 
   return (
-    <AppShell breadcrumbs={<span><Link to="/batches" className="hover:underline">Batches</Link> · {batch.name}</span>}>
-      <div className="flex flex-col h-[calc(100vh-3rem)]">
+    <div className="flex flex-col h-[calc(100vh-3rem)]">
         {/* Batch header */}
         <div className="px-6 pt-5 pb-4 border-b border-border bg-card/40">
           <div className="flex items-start justify-between gap-4">
@@ -45,13 +44,19 @@ export default function TriageWorkspace() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <Link to={`/batches/${batch.id}/ai-review`} className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5">
+              <Link
+                to={appPaths.batchAiReview(batch.id)}
+                className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5"
+              >
                 <Sparkles className="h-4 w-4 text-status-augmented" /> AI review (31)
               </Link>
               <button className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5">
                 <RotateCw className="h-4 w-4" /> Re-validate
               </button>
-              <Link to={`/batches/${batch.id}/submit`} className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5">
+              <Link
+                to={appPaths.batchSubmit(batch.id)}
+                className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5"
+              >
                 <Send className="h-4 w-4" /> Prepare submission
               </Link>
             </div>
@@ -187,7 +192,10 @@ export default function TriageWorkspace() {
                 <div className="font-medium truncate">{selected.productName}</div>
                 <div className="mt-1.5"><StatusChip status={selected.status} /></div>
               </div>
-              <Link to={`/batches/${batch.id}/rows/${selected.id}`} className="text-xs h-8 px-2.5 rounded-sm border border-border hover:bg-muted inline-flex items-center gap-1 shrink-0">
+              <Link
+                to={appPaths.batchRow(batch.id, selected.id)}
+                className="text-xs h-8 px-2.5 rounded-sm border border-border hover:bg-muted inline-flex items-center gap-1 shrink-0"
+              >
                 Open <ExternalLink className="h-3 w-3" />
               </Link>
             </header>
@@ -244,7 +252,7 @@ export default function TriageWorkspace() {
                 </ol>
               </section>
 
-              <Link to={`/batches/${batch.id}/rows/${selected.id}`} className="flex items-center justify-between text-sm text-primary hover:underline">
+              <Link to={appPaths.batchRow(batch.id, selected.id)} className="flex items-center justify-between text-sm text-primary hover:underline">
                 <span>Open full row inspector</span>
                 <ChevronRight className="h-4 w-4" />
               </Link>
@@ -252,6 +260,5 @@ export default function TriageWorkspace() {
           </aside>
         </div>
       </div>
-    </AppShell>
   );
 }

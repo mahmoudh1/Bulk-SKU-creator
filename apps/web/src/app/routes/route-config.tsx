@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { appPaths } from "./paths";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { OrganizationBoundary } from "./OrganizationBoundary";
+import { AppShellLayout } from "@/app/layouts/AppShellLayout";
 import AdminGovernance from "@/routes/pages/AdminGovernance";
 import AIReview from "@/routes/pages/AIReview";
 import Auth from "@/routes/pages/Auth";
@@ -32,27 +33,29 @@ export function AppRoutes() {
         <Route path={appPaths.home} element={<Navigate to={appPaths.workspace} replace />} />
         <Route path={appPaths.workspace} element={<WorkspaceSelect />} />
         <Route element={<OrganizationBoundary />}>
-          <Route path={appPaths.dashboard} element={<Dashboard />} />
-          <Route path={appPaths.batches} element={<BatchesList />} />
-          <Route path={appPaths.createBatch} element={<CreateBatch />} />
-          <Route path="/batches/:id/mapping" element={<IntakeMapping />} />
-          <Route path="/batches/:id/review" element={<TriageWorkspace />} />
-          <Route path="/batches/:id/rows/:rowId" element={<RowInspector />} />
-          <Route path="/batches/:id/ai-review" element={<AIReview />} />
-          <Route path="/batches/:id/images" element={<ImagePlan />} />
-          <Route path="/batches/:id/submit" element={<SubmissionScope />} />
-          <Route path={appPaths.submissions} element={<SubmissionMonitor />} />
-          <Route path={appPaths.submissionFailures} element={<FailureRecovery />} />
-          <Route path={appPaths.sellerDefaults} element={<SellerDefaults />} />
-          <Route path={appPaths.savedViews} element={<SavedViews />} />
-          <Route path={appPaths.support} element={<SupportInvestigation />} />
-          <Route path={appPaths.admin} element={<AdminGovernance />} />
-          <Route path={appPaths.states} element={<StatesShowcase />} />
-          <Route path={appPaths.mobile} element={<MobileCompanion />} />
-          <Route path={appPaths.reviewHub} element={<Navigate to={appPaths.batches} replace />} />
-          <Route path={appPaths.reviewRowsHub} element={<Navigate to={appPaths.batches} replace />} />
-          <Route path={appPaths.reviewAiHub} element={<Navigate to={appPaths.batches} replace />} />
-          <Route path={appPaths.reviewImagesHub} element={<Navigate to={appPaths.batches} replace />} />
+          <Route element={<AppShellLayout />}>
+            <Route path={appPaths.dashboard} element={<Dashboard />} />
+            <Route path={appPaths.batches} element={<BatchesList />} />
+            <Route path={appPaths.createBatch} element={<CreateBatch />} />
+            <Route path="/batches/:id/mapping" element={<IntakeMapping />} />
+            <Route path="/batches/:id/review" element={<TriageWorkspace />} />
+            <Route path="/batches/:id/rows/:rowId" element={<RowInspector />} />
+            <Route path="/batches/:id/ai-review" element={<AIReview />} />
+            <Route path="/batches/:id/images" element={<ImagePlan />} />
+            <Route path="/batches/:id/submit" element={<SubmissionScope />} />
+            <Route path={appPaths.submissions} element={<SubmissionMonitor />} />
+            <Route path={appPaths.submissionFailures} element={<FailureRecovery />} />
+            <Route path={appPaths.sellerDefaults} element={<SellerDefaults />} />
+            <Route path={appPaths.savedViews} element={<SavedViews />} />
+            <Route path={appPaths.support} element={<SupportInvestigation />} />
+            <Route path={appPaths.admin} element={<AdminGovernance />} />
+            <Route path={appPaths.states} element={<StatesShowcase />} />
+            <Route path={appPaths.mobile} element={<MobileCompanion />} />
+            <Route path={appPaths.reviewHub} element={<Navigate to={appPaths.batches} replace />} />
+            <Route path={appPaths.reviewRowsHub} element={<Navigate to={appPaths.batches} replace />} />
+            <Route path={appPaths.reviewAiHub} element={<Navigate to={appPaths.batches} replace />} />
+            <Route path={appPaths.reviewImagesHub} element={<Navigate to={appPaths.batches} replace />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<NotFound />} />

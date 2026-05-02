@@ -1,5 +1,3 @@
-import { Link } from "react-router-dom";
-import { AppShell } from "@/components/AppShell";
 import { FolderOpen, Filter, Inbox, LifeBuoy, Bookmark, Plus, Upload, RotateCw, Sparkles, ImageIcon, Send, Clock, AlertCircle } from "lucide-react";
 
 function Empty({ icon: Icon, title, desc, action }: any) {
@@ -43,15 +41,14 @@ function Loading({ icon: Icon, title, sub, mode }: any) {
             } animate-pulse-soft`} />
           </div>
         </div>
-      </div>
+    </div>
     </div>
   );
 }
 
 export default function StatesShowcase() {
   return (
-    <AppShell breadcrumbs={<span>Patterns · Empty & loading states</span>}>
-      <div className="px-6 py-5 max-w-[1280px]">
+    <div className="px-6 py-5 max-w-[1280px]">
         <h1 className="text-xl font-semibold">Empty & loading state library</h1>
         <p className="text-sm text-muted-foreground mt-1">Reference patterns. Realistic, calm, never reliant on color alone.</p>
 
@@ -86,6 +83,5 @@ export default function StatesShowcase() {
           </div>
         </div>
       </div>
-    </AppShell>
   );
 }
