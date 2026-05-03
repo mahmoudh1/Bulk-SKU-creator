@@ -1,11 +1,47 @@
 import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 
+import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
 import { appPaths } from "@/app/routes/paths";
 import { SubmissionChip } from "@/components/StatusChip";
-import { batches } from "@/data/mock";
+import { listBatches, type BatchListItemDto } from "@/lib/api-client/batches";
 import { Plus, Search, SlidersHorizontal, FolderOpen } from "lucide-react";
 
 export default function BatchesList() {
+  const { activeWorkspace } = useOrganizationContext();
+  const [batches, setBatches] = useState<BatchListItemDto[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeWorkspace?.id) {
+      setBatches([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    listBatches(activeWorkspace.id)
+      .then((items) => {
+        if (!cancelled) {
+          setBatches(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBatches([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace?.id]);
+
   return (
     <div className="px-6 py-6 max-w-[1400px]">
       <div className="flex items-end justify-between mb-5">
@@ -36,7 +72,9 @@ export default function BatchesList() {
               {f}
             </button>
           ))}
-          <div className="ml-auto text-xs text-muted-foreground">{batches.length} batches</div>
+          <div className="ml-auto text-xs text-muted-foreground">
+            {isLoading ? "Loading batches" : `${batches.length} batches`}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -80,6 +118,13 @@ export default function BatchesList() {
                   <td className="px-2 py-3 text-muted-foreground text-xs">{b.lastUpdated}</td>
                 </tr>
               ))}
+              {!isLoading && batches.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No batches found for this workspace. Create a batch from a spreadsheet to populate this list.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>

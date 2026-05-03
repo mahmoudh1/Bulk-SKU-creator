@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { bulkSkuApiPlugin } from "./server/bulk-sku-api";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
@@ -11,7 +12,7 @@ export default defineConfig(() => ({
       overlay: false,
     },
   },
-  plugins: [react()],
+  plugins: [bulkSkuApiPlugin(), react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -40,6 +40,7 @@ interface NavigationItem {
 
 const operations: NavigationItem[] = [
   { title: "Dashboard", url: appPaths.dashboard, icon: LayoutDashboard },
+  { title: "Image assets", url: appPaths.imageAssets, icon: ImageIcon },
   { title: "Batches", url: appPaths.batches, icon: Package },
   { title: "Create batch", url: appPaths.createBatch, icon: Upload },
   { title: "Submission monitor", url: appPaths.submissions, icon: Send },

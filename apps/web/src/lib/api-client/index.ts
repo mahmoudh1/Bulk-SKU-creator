@@ -7,3 +7,6 @@ export function createApiClient(_config: ApiClientConfig = {}) {
     ready: false as const,
   };
 }
+
+export * from "./image-assets";
+export * from "./batches";
