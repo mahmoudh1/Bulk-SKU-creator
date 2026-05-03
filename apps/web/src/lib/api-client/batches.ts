@@ -904,3 +904,228 @@ export async function listBatches(organizationId: string): Promise<BatchListItem
 
   return (await response.json()) as BatchListItemDto[];
 }
+
+export type ReadinessState = "READY" | "READY_WITH_AUGMENTATION" | "NEEDS_INPUT" | "NOT_ENOUGH_DATA" | "BLOCKED_FOR_REVIEW";
+export type RowLifecycleStage = "INTAKE_READY" | "READINESS_EVALUATED" | "NEEDS_CORRECTION" | "READY_FOR_SUBMISSION_PREP";
+
+export interface ReadinessIssueSummaryDto {
+  code: IntakeInterpretationIssueCode | ImageIntakeIssueCode;
+  message: string;
+}
+
+export interface ReadinessImageEvidenceDto {
+  imageId: string;
+  previewRef: string;
+}
+
+export interface BatchReadinessRowDto {
+  rowId: string;
+  batchId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  rowRevision: number;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issueSummaries: ReadinessIssueSummaryDto[];
+  imageEvidence: ReadinessImageEvidenceDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+export interface BatchReadinessEvaluationDto {
+  batchId: string;
+  organizationId: string;
+  rows: BatchReadinessRowDto[];
+  summary: {
+    totalRows: number;
+    ready: number;
+    readyAugmented: number;
+    needsInput: number;
+    blocked: number;
+    notEnoughData: number;
+  };
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluateBatchReadinessInput {
+  batchId: string;
+  organizationId: string;
+}
+
+const batchReadinessStorageKey = "bulk-sku-creator:batch-readiness-evaluations:v1";
+
+function readStoredReadiness(): Record<string, BatchReadinessEvaluationDto> {
+  if (!canUseBrowserStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(batchReadinessStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, BatchReadinessEvaluationDto>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredReadiness(evaluation: BatchReadinessEvaluationDto) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    batchReadinessStorageKey,
+    JSON.stringify({
+      ...readStoredReadiness(),
+      [evaluation.batchId]: evaluation,
+    }),
+  );
+}
+
+function loadStoredReadiness(batchId: string, organizationId: string) {
+  const evaluation = readStoredReadiness()[batchId];
+
+  if (!evaluation || evaluation.organizationId !== organizationId) {
+    return null;
+  }
+
+  return evaluation;
+}
+
+function readinessStableHash(row: Pick<BatchReadinessRowDto, "readinessState" | "lifecycleStage" | "issueSummaries" | "imageEvidence" | "rowRevision">) {
+  return JSON.stringify({
+    readinessState: row.readinessState,
+    lifecycleStage: row.lifecycleStage,
+    issueSummaries: row.issueSummaries,
+    imageEvidence: row.imageEvidence,
+    rowRevision: row.rowRevision,
+  });
+}
+
+function evaluateReadinessRow(row: BatchIntakeRowDto): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
+  const issueSummaries: ReadinessIssueSummaryDto[] = [
+    ...row.interpretationIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+    ...row.imageIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+  ];
+  const readinessState: ReadinessState = issueSummaries.length > 0 ? "NEEDS_INPUT" : "READY";
+  const lifecycleStage: RowLifecycleStage = readinessState === "READY" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
+  const imageEvidence = row.resolvedAssets.map((asset) => ({ imageId: asset.imageId, previewRef: asset.previewRef }));
+
+  return {
+    rowId: row.rowId,
+    batchId: row.batchId,
+    sourceRowNumber: row.sourceRowNumber,
+    sourceRowKey: row.sourceRowKey,
+    rowRevision: row.rowRevision,
+    readinessState,
+    lifecycleStage,
+    issueSummaries,
+    imageEvidence,
+  };
+}
+
+function buildReadinessSummary(rows: BatchReadinessRowDto[]): BatchReadinessEvaluationDto["summary"] {
+  const ready = rows.filter((row) => row.readinessState === "READY").length;
+  const readyAugmented = rows.filter((row) => row.readinessState === "READY_WITH_AUGMENTATION").length;
+  const needsInput = rows.filter((row) => row.readinessState === "NEEDS_INPUT").length;
+  const blocked = rows.filter((row) => row.readinessState === "BLOCKED_FOR_REVIEW").length;
+  const notEnoughData = rows.filter((row) => row.readinessState === "NOT_ENOUGH_DATA").length;
+
+  return {
+    totalRows: rows.length,
+    ready,
+    readyAugmented,
+    needsInput,
+    blocked,
+    notEnoughData,
+  };
+}
+
+export async function evaluateBatchReadiness({ batchId, organizationId }: EvaluateBatchReadinessInput): Promise<BatchReadinessEvaluationDto> {
+  if (!batchId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Batch readiness evaluation requires a batch and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/readiness/evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organizationId }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessEvaluationDto;
+  }
+
+  const review = loadStoredReview(batchId, organizationId);
+
+  if (!review) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch intake data was not found. Create the batch from a spreadsheet before running readiness evaluation.",
+    } satisfies BatchApiError;
+  }
+
+  const previous = loadStoredReadiness(batchId, organizationId);
+  const now = new Date("2026-05-03T18:45:00.000Z").toISOString();
+  const rows = review.rows.map((row) => {
+    const base = evaluateReadinessRow(row);
+    const existing = previous?.rows.find((item) => item.rowId === base.rowId && item.rowRevision === base.rowRevision);
+
+    if (existing && readinessStableHash(existing) === readinessStableHash(base)) {
+      return existing;
+    }
+
+    const updatedAt = existing?.updatedAt ?? now;
+    const evaluatedAt = existing?.evaluatedAt ?? now;
+
+    return { ...base, evaluatedAt, updatedAt: existing ? now : updatedAt };
+  });
+
+  const updatedAt = previous && rows.every((row) => previous.rows.some((prevRow) => prevRow.rowId === row.rowId && prevRow.rowRevision === row.rowRevision && readinessStableHash(prevRow) === readinessStableHash(row)))
+    ? previous.updatedAt
+    : now;
+  const evaluatedAt = previous?.evaluatedAt ?? now;
+
+  const evaluation: BatchReadinessEvaluationDto = {
+    batchId,
+    organizationId,
+    rows,
+    summary: buildReadinessSummary(rows),
+    evaluatedAt,
+    updatedAt,
+  };
+
+  writeStoredReadiness(evaluation);
+  return evaluation;
+}
+
+export async function getBatchReadiness({ batchId, organizationId }: EvaluateBatchReadinessInput): Promise<BatchReadinessEvaluationDto> {
+  if (!batchId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Batch readiness evaluation requires a batch and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/readiness?organizationId=${encodeURIComponent(organizationId)}`);
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessEvaluationDto;
+  }
+
+  const readiness = loadStoredReadiness(batchId, organizationId);
+
+  if (!readiness) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch readiness data was not found. Run readiness evaluation before opening the triage workspace.",
+    } satisfies BatchApiError;
+  }
+
+  return readiness;
+}

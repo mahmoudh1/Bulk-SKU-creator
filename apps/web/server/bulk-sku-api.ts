@@ -12,6 +12,8 @@ type BatchIntakeStatus = "INTAKE_NEEDS_CORRECTION" | "INTAKE_READY";
 type ImageResolutionStatus = "RESOLVED";
 type FieldMappingStatus = "MAPPED";
 type RowInterpretationStatus = "READY_FOR_REVIEW" | "NEEDS_CORRECTION";
+type ReadinessState = "READY" | "READY_WITH_AUGMENTATION" | "NEEDS_INPUT" | "NOT_ENOUGH_DATA" | "BLOCKED_FOR_REVIEW";
+type RowLifecycleStage = "INTAKE_READY" | "READINESS_EVALUATED" | "NEEDS_CORRECTION" | "READY_FOR_SUBMISSION_PREP";
 
 interface SourceRow {
   [key: string]: string;
@@ -105,6 +107,46 @@ interface BatchIntakeReviewDto {
     }>;
     nextCorrectionRowId?: string;
   };
+}
+
+interface ReadinessIssueSummaryDto {
+  code: string;
+  message: string;
+}
+
+interface ReadinessImageEvidenceDto {
+  imageId: string;
+  previewRef: string;
+}
+
+interface BatchReadinessRowDto {
+  rowId: string;
+  batchId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  rowRevision: number;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issueSummaries: ReadinessIssueSummaryDto[];
+  imageEvidence: ReadinessImageEvidenceDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+interface BatchReadinessEvaluationDto {
+  batchId: string;
+  organizationId: string;
+  rows: BatchReadinessRowDto[];
+  summary: {
+    totalRows: number;
+    ready: number;
+    readyAugmented: number;
+    needsInput: number;
+    blocked: number;
+    notEnoughData: number;
+  };
+  evaluatedAt: string;
+  updatedAt: string;
 }
 
 const requiredColumns = ["sku", "name", "brand", "image_id"] as const;
@@ -228,6 +270,60 @@ async function ensureSchema() {
 
     create index if not exists batch_intake_reviews_organization_idx
       on batch_intake_reviews (organization_id, updated_at desc);
+
+    create table if not exists batch_readiness_results (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      source_row_number integer not null,
+      source_row_key text not null,
+      row_revision integer not null,
+      readiness_state text not null,
+      lifecycle_stage text not null,
+      issue_summaries jsonb not null default '[]'::jsonb,
+      evidence jsonb not null default '[]'::jsonb,
+      evaluated_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_readiness_results_batch_idx
+      on batch_readiness_results (organization_id, batch_id, updated_at desc);
+
+    alter table batch_readiness_results add column if not exists source_row_number integer;
+    alter table batch_readiness_results add column if not exists source_row_key text;
+    alter table batch_readiness_results add column if not exists evaluated_at timestamptz not null default now();
+    alter table batch_readiness_results add column if not exists updated_at timestamptz not null default now();
+
+    create table if not exists batch_row_lifecycle_events (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      row_revision integer not null,
+      lifecycle_stage text not null,
+      readiness_state text not null,
+      decision_context jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_row_lifecycle_events_batch_idx
+      on batch_row_lifecycle_events (organization_id, batch_id, updated_at desc);
+
+    create table if not exists batch_row_validation_evidence (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      row_revision integer not null,
+      evidence jsonb not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_row_validation_evidence_batch_idx
+      on batch_row_validation_evidence (organization_id, batch_id, updated_at desc);
   `).then(() => undefined);
 
   return schemaReady;
@@ -780,6 +876,275 @@ async function handleReprocess(req: IncomingMessage, res: ServerResponse, batchI
   });
 }
 
+function evaluateReadinessRow(row: BatchIntakeReviewDto["rows"][number]): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
+  const issueSummaries: ReadinessIssueSummaryDto[] = [
+    ...row.interpretationIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+    ...row.imageIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+  ];
+  const readinessState: ReadinessState = issueSummaries.length > 0 ? "NEEDS_INPUT" : "READY";
+  const lifecycleStage: RowLifecycleStage = readinessState === "READY" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
+  const imageEvidence = row.resolvedAssets.map((asset) => ({ imageId: asset.imageId, previewRef: asset.previewRef }));
+
+  return {
+    rowId: row.rowId,
+    batchId: row.batchId,
+    sourceRowNumber: row.sourceRowNumber,
+    sourceRowKey: row.sourceRowKey,
+    rowRevision: row.rowRevision,
+    readinessState,
+    lifecycleStage,
+    issueSummaries,
+    imageEvidence,
+  };
+}
+
+function buildReadinessSummary(rows: BatchReadinessRowDto[]): BatchReadinessEvaluationDto["summary"] {
+  const ready = rows.filter((row) => row.readinessState === "READY").length;
+  const readyAugmented = rows.filter((row) => row.readinessState === "READY_WITH_AUGMENTATION").length;
+  const needsInput = rows.filter((row) => row.readinessState === "NEEDS_INPUT").length;
+  const blocked = rows.filter((row) => row.readinessState === "BLOCKED_FOR_REVIEW").length;
+  const notEnoughData = rows.filter((row) => row.readinessState === "NOT_ENOUGH_DATA").length;
+
+  return {
+    totalRows: rows.length,
+    ready,
+    readyAugmented,
+    needsInput,
+    blocked,
+    notEnoughData,
+  };
+}
+
+async function upsertReadinessRow(
+  client: import("pg").PoolClient,
+  organizationId: string,
+  batchId: string,
+  base: Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt">,
+) {
+  const issueSummaries = JSON.stringify(base.issueSummaries);
+  const evidence = JSON.stringify(base.imageEvidence);
+  const inserted = await client.query<{ evaluated_at: string; updated_at: string }>(
+    `insert into batch_readiness_results (
+        organization_id,
+        batch_id,
+        row_id,
+        source_row_number,
+        source_row_key,
+        row_revision,
+        readiness_state,
+        lifecycle_stage,
+        issue_summaries,
+        evidence
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+      on conflict (organization_id, batch_id, row_id, row_revision) do update set
+        source_row_number = excluded.source_row_number,
+        source_row_key = excluded.source_row_key,
+        readiness_state = excluded.readiness_state,
+        lifecycle_stage = excluded.lifecycle_stage,
+        issue_summaries = excluded.issue_summaries,
+        evidence = excluded.evidence,
+        updated_at = now()
+      where batch_readiness_results.source_row_number is distinct from excluded.source_row_number
+        or batch_readiness_results.source_row_key is distinct from excluded.source_row_key
+        or batch_readiness_results.readiness_state is distinct from excluded.readiness_state
+        or batch_readiness_results.lifecycle_stage is distinct from excluded.lifecycle_stage
+        or batch_readiness_results.issue_summaries is distinct from excluded.issue_summaries
+        or batch_readiness_results.evidence is distinct from excluded.evidence
+      returning evaluated_at::text, updated_at::text`,
+    [
+      organizationId,
+      batchId,
+      base.rowId,
+      base.sourceRowNumber,
+      base.sourceRowKey,
+      base.rowRevision,
+      base.readinessState,
+      base.lifecycleStage,
+      issueSummaries,
+      evidence,
+    ],
+  );
+
+  if (inserted.rows[0]) {
+    return { ...base, evaluatedAt: inserted.rows[0].evaluated_at, updatedAt: inserted.rows[0].updated_at } satisfies BatchReadinessRowDto;
+  }
+
+  const existing = await client.query<{ evaluated_at: string; updated_at: string }>(
+    `select evaluated_at::text, updated_at::text
+       from batch_readiness_results
+      where organization_id = $1 and batch_id = $2 and row_id = $3 and row_revision = $4`,
+    [organizationId, batchId, base.rowId, base.rowRevision],
+  );
+
+  const record = existing.rows[0] ?? { evaluated_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  return { ...base, evaluatedAt: record.evaluated_at, updatedAt: record.updated_at } satisfies BatchReadinessRowDto;
+}
+
+async function upsertLifecycleEvent(
+  client: import("pg").PoolClient,
+  organizationId: string,
+  batchId: string,
+  base: Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt">,
+) {
+  const decisionContext = JSON.stringify({ issueSummaries: base.issueSummaries, imageEvidence: base.imageEvidence });
+
+  await client.query(
+    `insert into batch_row_lifecycle_events (
+        organization_id,
+        batch_id,
+        row_id,
+        row_revision,
+        lifecycle_stage,
+        readiness_state,
+        decision_context
+      )
+      values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      on conflict (organization_id, batch_id, row_id, row_revision) do update set
+        lifecycle_stage = excluded.lifecycle_stage,
+        readiness_state = excluded.readiness_state,
+        decision_context = excluded.decision_context,
+        updated_at = now()
+      where batch_row_lifecycle_events.lifecycle_stage is distinct from excluded.lifecycle_stage
+        or batch_row_lifecycle_events.readiness_state is distinct from excluded.readiness_state
+        or batch_row_lifecycle_events.decision_context is distinct from excluded.decision_context`,
+    [organizationId, batchId, base.rowId, base.rowRevision, base.lifecycleStage, base.readinessState, decisionContext],
+  );
+}
+
+async function upsertValidationEvidence(
+  client: import("pg").PoolClient,
+  organizationId: string,
+  batchId: string,
+  base: Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt">,
+) {
+  const evidence = JSON.stringify({ imageEvidence: base.imageEvidence });
+
+  await client.query(
+    `insert into batch_row_validation_evidence (
+        organization_id,
+        batch_id,
+        row_id,
+        row_revision,
+        evidence
+      )
+      values ($1, $2, $3, $4, $5::jsonb)
+      on conflict (organization_id, batch_id, row_id, row_revision) do update set
+        evidence = excluded.evidence,
+        updated_at = now()
+      where batch_row_validation_evidence.evidence is distinct from excluded.evidence`,
+    [organizationId, batchId, base.rowId, base.rowRevision, evidence],
+  );
+}
+
+async function handleEvaluateReadiness(req: IncomingMessage, res: ServerResponse, batchId: string) {
+  const input = await parseJson(req);
+  const organizationId = String(input.organizationId ?? "");
+
+  if (!organizationId) {
+    return sendError(res, 400, "MISSING_ORGANIZATION", "Select an active workspace before running readiness evaluation.");
+  }
+
+  const review = await readReview(batchId, organizationId);
+
+  if (!review) {
+    return sendError(res, 404, "INTAKE_FAILED", "Batch intake data was not found. Create the batch from a spreadsheet before running readiness evaluation.");
+  }
+
+  if (!review.handoff.readyForReadinessEvaluation) {
+    return sendError(res, 409, "INTAKE_FAILED", "Resolve intake blockers before running readiness evaluation.");
+  }
+
+  const client = await getPool().connect();
+
+  try {
+    await client.query("begin");
+    const rows: BatchReadinessRowDto[] = [];
+
+    for (const row of review.rows) {
+      const base = evaluateReadinessRow(row);
+      const persisted = await upsertReadinessRow(client, organizationId, batchId, base);
+      await upsertLifecycleEvent(client, organizationId, batchId, base);
+      await upsertValidationEvidence(client, organizationId, batchId, base);
+      rows.push(persisted);
+    }
+
+    await client.query("commit");
+    const summary = buildReadinessSummary(rows);
+    const evaluatedAt = rows.map((row) => row.evaluatedAt).sort().at(-1) ?? new Date().toISOString();
+    const updatedAt = rows.map((row) => row.updatedAt).sort().at(-1) ?? evaluatedAt;
+
+    sendJson(res, 200, { batchId, organizationId, rows, summary, evaluatedAt, updatedAt } satisfies BatchReadinessEvaluationDto);
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, batchId: string) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const organizationId = url.searchParams.get("organizationId") ?? "";
+
+  if (!organizationId) {
+    return sendError(res, 400, "MISSING_ORGANIZATION", "Select an active workspace before fetching readiness data.");
+  }
+
+  const result = await getPool().query<{
+    row_id: string;
+    source_row_number: number;
+    source_row_key: string;
+    row_revision: number;
+    readiness_state: ReadinessState;
+    lifecycle_stage: RowLifecycleStage;
+    issue_summaries: ReadinessIssueSummaryDto[];
+    evidence: ReadinessImageEvidenceDto[];
+    evaluated_at: string;
+    updated_at: string;
+  }>(
+    `select
+        row_id,
+        source_row_number,
+        source_row_key,
+        row_revision,
+        readiness_state,
+        lifecycle_stage,
+        issue_summaries,
+        evidence,
+        evaluated_at::text,
+        updated_at::text
+      from batch_readiness_results
+      where organization_id = $1 and batch_id = $2
+      order by source_row_number asc`,
+    [organizationId, batchId],
+  );
+
+  if (result.rows.length === 0) {
+    return sendError(res, 404, "INTAKE_FAILED", "Batch readiness data was not found. Run readiness evaluation before opening triage.");
+  }
+
+  const rows: BatchReadinessRowDto[] = result.rows.map((row) => ({
+    rowId: row.row_id,
+    batchId,
+    sourceRowNumber: row.source_row_number,
+    sourceRowKey: row.source_row_key,
+    rowRevision: row.row_revision,
+    readinessState: row.readiness_state,
+    lifecycleStage: row.lifecycle_stage,
+    issueSummaries: Array.isArray(row.issue_summaries) ? row.issue_summaries : [],
+    imageEvidence: Array.isArray(row.evidence) ? row.evidence : [],
+    evaluatedAt: row.evaluated_at,
+    updatedAt: row.updated_at,
+  }));
+
+  const summary = buildReadinessSummary(rows);
+  const evaluatedAt = rows.map((row) => row.evaluatedAt).sort().at(-1) ?? new Date().toISOString();
+  const updatedAt = rows.map((row) => row.updatedAt).sort().at(-1) ?? evaluatedAt;
+
+  sendJson(res, 200, { batchId, organizationId, rows, summary, evaluatedAt, updatedAt } satisfies BatchReadinessEvaluationDto);
+}
+
 async function routeApi(req: IncomingMessage, res: ServerResponse) {
   await ensureSchema();
 
@@ -814,6 +1179,18 @@ async function routeApi(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === "POST" && reprocessMatch) {
     return handleReprocess(req, res, reprocessMatch[1]);
+  }
+
+  const readinessEvaluateMatch = pathname.match(/^\/api\/batches\/([^/]+)\/readiness\/evaluate$/);
+
+  if (req.method === "POST" && readinessEvaluateMatch) {
+    return handleEvaluateReadiness(req, res, readinessEvaluateMatch[1]);
+  }
+
+  const readinessMatch = pathname.match(/^\/api\/batches\/([^/]+)\/readiness$/);
+
+  if (req.method === "GET" && readinessMatch) {
+    return handleGetReadiness(req, res, readinessMatch[1]);
   }
 
   sendError(res, 404, "NOT_FOUND", "API route was not found.");
