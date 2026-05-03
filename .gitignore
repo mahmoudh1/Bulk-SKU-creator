@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+*.tsbuildinfo
+
+*.log
+.playwright-mcp/
+node_modules/.vite/

@@ -3,6 +3,7 @@ export const appPaths = {
   auth: "/auth",
   workspace: "/workspace",
   dashboard: "/dashboard",
+  imageAssets: "/image-assets",
   batches: "/batches",
   createBatch: "/batches/new",
   batchMapping: (batchId: string) => `/batches/${batchId}/mapping`,

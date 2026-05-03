@@ -15,6 +15,7 @@ import WorkspaceSelect from "@/routes/pages/WorkspaceSelect";
 const AdminGovernance = lazy(() => import("@/routes/pages/AdminGovernance"));
 const AIReview = lazy(() => import("@/routes/pages/AIReview"));
 const FailureRecovery = lazy(() => import("@/routes/pages/FailureRecovery"));
+const ImageAssets = lazy(() => import("@/routes/pages/ImageAssets"));
 const ImagePlan = lazy(() => import("@/routes/pages/ImagePlan"));
 const IntakeMapping = lazy(() => import("@/routes/pages/IntakeMapping"));
 const MobileCompanion = lazy(() => import("@/routes/pages/MobileCompanion"));
@@ -48,6 +49,7 @@ export function AppRoutes() {
           <Route element={<OrganizationBoundary />}>
             <Route element={<AppShellLayout />}>
               <Route path={appPaths.dashboard} element={<Dashboard />} />
+              <Route path={appPaths.imageAssets} element={<ImageAssets />} />
               <Route path={appPaths.batches} element={<BatchesList />} />
               <Route path={appPaths.createBatch} element={<CreateBatch />} />
               <Route path="/batches/:id/mapping" element={<IntakeMapping />} />

@@ -536,7 +536,7 @@ So that I know when the batch is ready to move into readiness evaluation.
 
 ## Epic 3: Readiness Triage and Row Correction
 
-Catalog operators can understand row readiness, investigate blockers, correct issues, manage lifecycle state, and move rows toward submission eligibility.
+Catalog operators can evaluate persisted intake rows, understand readiness, investigate blockers, correct issues, manage lifecycle state, and move rows toward submission eligibility. Epic 3 builds on the Epic 2 Neon-backed batch intake records and Cloudflare R2 image assets; the browser must not recompute authoritative readiness or rely on prototype row data.
 
 ### Story 3.1: Evaluate Rows into Lifecycle and Readiness States
 
@@ -549,17 +549,22 @@ So that I can understand where the batch stands before submission work begins.
 **Given** a batch has completed intake and is ready for evaluation
 **When** readiness processing runs
 **Then** each row is assigned a lifecycle stage and a readiness state
-**And** the states use the approved vocabulary consistently across the system.
+**And** the states use the approved vocabulary consistently across the Neon record, API DTOs, and UI.
 
 **Given** a row is evaluated
 **When** the readiness result is persisted
 **Then** the system stores enough decision context to explain the row's current state
-**And** later screens can retrieve that state without recomputing it in the UI.
+**And** later screens retrieve that state from Neon without recomputing it in the UI.
 
 **Given** readiness logic runs more than once for the same row revision and inputs
 **When** the evaluation completes
 **Then** the system produces deterministic outcomes for the same conditions
 **And** does not create inconsistent status behavior across repeated views.
+
+**Given** an intake row has resolved R2-backed image assets
+**When** readiness evaluation records image evidence
+**Then** the readiness result references the server-controlled image asset IDs and preview endpoints
+**And** does not store external image URLs or browser-local blob references as authoritative evidence.
 
 ### Story 3.2: Build the Batch Triage Workspace and Status-First Review Grid
 
@@ -572,17 +577,22 @@ So that I can triage the highest-priority work quickly.
 **Given** a batch contains evaluated rows
 **When** the operator opens the batch review workspace
 **Then** they see a status-first triage surface with summary counts, row states, and filtering tools
-**And** the interface follows the approved table-first UX direction.
+**And** the interface follows the approved table-first UX direction using server-backed batch data.
 
 **Given** the operator needs to focus on a subset of rows
 **When** they filter or sort the workspace
 **Then** the grid responds with the relevant rows and stable status presentation
-**And** warnings, blockers, and readiness states remain visually distinct.
+**And** warnings, blockers, and readiness states remain visually distinct in text and visual treatment.
 
 **Given** a batch contains many rows
 **When** the operator scans the workspace
 **Then** the grid remains operationally usable for triage
 **And** the highest-leverage blocked or incomplete work is easy to identify.
+
+**Given** the current prototype previously used mock rows
+**When** the triage workspace loads
+**Then** it reads rows and counts through the API/query layer from Neon
+**And** hardcoded demo batch or row IDs are not used as fallback data.
 
 ### Story 3.3: Show Row Detail with Blocker, Warning, and Lifecycle Reasoning
 
@@ -595,12 +605,17 @@ So that I can understand exactly why it is or is not ready.
 **Given** the operator selects a row from the batch workspace
 **When** the row detail inspector opens
 **Then** it shows the row summary, lifecycle state, readiness state, blockers, warnings, and supporting evidence
-**And** these sections are separated clearly for review.
+**And** these sections are separated clearly for review using the approved diagnostic-console UX pattern.
 
 **Given** a row has one or more issues
 **When** the operator reviews the detail view
 **Then** each issue includes a reason and the next useful action
 **And** the operator does not need to infer the correction path from vague messaging.
+
+**Given** a row includes source, normalized, readiness, and image evidence
+**When** the operator opens row detail
+**Then** the inspector distinguishes source facts, normalized fields, validation results, R2-backed image evidence, and lifecycle history
+**And** each section is sourced from persisted server data rather than mock row fixtures.
 
 **Given** the operator closes or leaves the row detail view
 **When** they return to the batch workspace
@@ -618,7 +633,7 @@ So that bad data is blocked before later workflow stages.
 **Given** a row is undergoing readiness validation
 **When** validation rules run
 **Then** the system checks identifier or exemption requirements, required attributes, variant structure, and image compliance
-**And** records validation results in a row-explainable form.
+**And** records validation results in a row-explainable Neon-backed form with rule codes, severity, and remediation hints.
 
 **Given** a required GTIN-style identifier is missing and no exemption path exists
 **When** validation completes
@@ -629,6 +644,11 @@ So that bad data is blocked before later workflow stages.
 **When** the result is shown to the operator
 **Then** the row detail identifies the failed rule area clearly
 **And** the batch workspace distinguishes it from non-blocking warnings.
+
+**Given** an image compliance rule evaluates a row
+**When** image evidence is required
+**Then** the system evaluates the image assets referenced by the persisted `image_id` values
+**And** uses server-side R2 asset metadata or preview access rather than trusting client-supplied filenames.
 
 ### Story 3.5: Surface Duplicate Risk and Block Forced-Match Cases
 
@@ -653,6 +673,11 @@ So that the system never silently changes listing mode.
 **Then** the system distinguishes warning-grade duplicate signals from hard-stop forced-match outcomes
 **And** preserves the new-product-only policy boundary.
 
+**Given** duplicate or forced-match signals are produced
+**When** the row is later inspected by operations or support users
+**Then** the persisted readiness evidence includes the signal source, severity, and decision outcome
+**And** the UI can explain the outcome without re-querying a mock catalog response.
+
 ### Story 3.6: Correct Rows In-Workflow and Revalidate Them
 
 As a catalog operator,
@@ -664,7 +689,7 @@ So that I can move blocked rows toward readiness without losing context.
 **Given** a row contains fixable issues
 **When** the operator edits supported fields in the row workflow
 **Then** those changes are persisted through the application
-**And** the row remains traceable to its original source identity and current revision context.
+**And** the row remains traceable to its original source identity and current revision context in Neon.
 
 **Given** the operator requests revalidation after a correction
 **When** the revalidation completes
@@ -675,6 +700,11 @@ So that I can move blocked rows toward readiness without losing context.
 **When** revalidation finishes
 **Then** the remaining blockers or warnings are shown clearly
 **And** the workflow continues from the same context rather than resetting the operator's progress.
+
+**Given** an edited row references a corrected image ID
+**When** revalidation runs
+**Then** the system resolves the corrected ID against the organization's persisted image assets
+**And** blocks the row if the image asset is missing, forbidden, or not readable from R2.
 
 ### Story 3.7: Require Manual Confirmation for Ambiguous Product Type Resolution
 
@@ -692,12 +722,17 @@ So that the system does not proceed on low-confidence classification.
 **Given** the operator reviews a row requiring manual product-type confirmation
 **When** they open the row detail workflow
 **Then** they can see the ambiguity and the available confirmation path
-**And** the decision is recorded for later traceability.
+**And** the decision is recorded for later traceability with the row revision and confirming user.
 
 **Given** the operator confirms a product type
 **When** revalidation runs afterward
 **Then** downstream validation uses the confirmed product type
 **And** the row can progress only if the rest of the readiness checks pass.
+
+**Given** product-type confirmation options are shown
+**When** the operator chooses or changes a product type
+**Then** the UI shows the validation impact before or immediately after revalidation
+**And** does not allow an ambiguous product type to appear ready for submission.
 
 ### Story 3.8: Preserve Batch Context and Resume Work Across Sessions
 
@@ -715,12 +750,17 @@ So that triage work remains efficient across long sessions and return visits.
 **Given** the operator leaves a previously created batch and returns later
 **When** they resume work
 **Then** the system restores the batch as an active ongoing workflow
-**And** the operator can continue from a meaningful recent review context.
+**And** the operator can continue from a meaningful recent review context stored or recoverable from server-backed state.
 
 **Given** the product is used in long-running operational sessions
 **When** context preservation behavior is exercised repeatedly
 **Then** it remains stable and predictable
 **And** does not conflict with the authoritative server-side workflow state.
+
+**Given** the current frontend gap analysis calls out incomplete URL-driven state and entity-aware shell context
+**When** Epic 3 review screens are implemented
+**Then** filters, selected row, correction focus, and batch identity are represented in stable URL or persisted view state
+**And** refreshes, deep links, and back navigation preserve the intended review context.
 
 ## Epic 4: AI Enrichment and Truthful Image Preparation
 

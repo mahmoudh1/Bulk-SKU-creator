@@ -8,6 +8,14 @@
     "dev:web": "npm run dev --workspace @bulk-sku-creator/web",
     "build:web": "npm run build --workspace @bulk-sku-creator/web",
     "lint:web": "npm run lint --workspace @bulk-sku-creator/web",
-    "test:web": "npm run test --workspace @bulk-sku-creator/web"
+    "test:web": "npm run test --workspace @bulk-sku-creator/web",
+    "check:services": "node scripts/check-services.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1041.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }
