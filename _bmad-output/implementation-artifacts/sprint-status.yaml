@@ -60,7 +60,7 @@ development_status:
   epic-3: in-progress
   3-1-evaluate-rows-into-lifecycle-and-readiness-states: review
   3-2-build-the-batch-triage-workspace-and-status-first-review-grid: review
-  3-3-show-row-detail-with-blocker-warning-and-lifecycle-reasoning: ready-for-dev
+  3-3-show-row-detail-with-blocker-warning-and-lifecycle-reasoning: review
   3-4-validate-identifier-attribute-variant-and-image-rules: ready-for-dev
   3-5-surface-duplicate-risk-and-block-forced-match-cases: ready-for-dev
   3-6-correct-rows-in-workflow-and-revalidate-them: ready-for-dev

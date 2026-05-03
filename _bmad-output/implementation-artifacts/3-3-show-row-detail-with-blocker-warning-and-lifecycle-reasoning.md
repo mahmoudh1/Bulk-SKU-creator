@@ -1,6 +1,6 @@
 # Story 3.3: Show Row Detail with Blocker, Warning, and Lifecycle Reasoning
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,27 +19,27 @@ so that I can understand exactly why it is or is not ready.
 
 ## Tasks / Subtasks
 
-- [ ] Replace mock row inspector data with server-backed row detail (AC: 1, 3)
-  - [ ] Update `apps/web/src/routes/pages/RowInspector.tsx` to fetch row detail by route `batchId`, `rowId`, and active organization.
-  - [ ] Remove `@/data/mock`, `prototypeBatchId`, and `prototypeRowId` fallback behavior from this route.
-  - [ ] Show explicit loading, not-found, and service-error states.
-- [ ] Add or extend row detail API-client contract (AC: 1, 2, 3)
-  - [ ] Return source identity, normalized fields, readiness state, lifecycle history, issue list, evidence, and image preview refs.
-  - [ ] Include issue severity, rule code, human-readable reason, and next action.
-  - [ ] Keep API DTO names consistent with Story 3.1/3.2 readiness contracts.
-- [ ] Render diagnostic sections (AC: 1, 2, 3)
-  - [ ] Source facts and normalized fields.
-  - [ ] Validation blockers and warnings.
-  - [ ] R2-backed image evidence using `/api/image-assets/:imageId/preview`.
-  - [ ] Lifecycle history and row revision context.
-- [ ] Preserve return context (AC: 4)
-  - [ ] Link back to `/batches/:id/review` with current query/search context when available.
-  - [ ] Preserve actual batch and row IDs in navigation.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Cover row detail rendering from API data.
-  - [ ] Cover issue reason and next action visibility.
-  - [ ] Cover R2 preview refs.
-  - [ ] Cover no mock fallback for unknown row IDs.
+- [x] Replace mock row inspector data with server-backed row detail (AC: 1, 3)
+  - [x] Update `apps/web/src/routes/pages/RowInspector.tsx` to fetch row detail by route `batchId`, `rowId`, and active organization.
+  - [x] Remove `@/data/mock`, `prototypeBatchId`, and `prototypeRowId` fallback behavior from this route.
+  - [x] Show explicit loading, not-found, and service-error states.
+- [x] Add or extend row detail API-client contract (AC: 1, 2, 3)
+  - [x] Return source identity, normalized fields, readiness state, lifecycle history, issue list, evidence, and image preview refs.
+  - [x] Include issue severity, rule code, human-readable reason, and next action.
+  - [x] Keep API DTO names consistent with Story 3.1/3.2 readiness contracts.
+- [x] Render diagnostic sections (AC: 1, 2, 3)
+  - [x] Source facts and normalized fields.
+  - [x] Validation blockers and warnings.
+  - [x] R2-backed image evidence using `/api/image-assets/:imageId/preview`.
+  - [x] Lifecycle history and row revision context.
+- [x] Preserve return context (AC: 4)
+  - [x] Link back to `/batches/:id/review` with current query/search context when available.
+  - [x] Preserve actual batch and row IDs in navigation.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Cover row detail rendering from API data.
+  - [x] Cover issue reason and next action visibility.
+  - [x] Cover R2 preview refs.
+  - [x] Cover no mock fallback for unknown row IDs.
 
 ## Dev Notes
 
@@ -101,13 +101,27 @@ so that I can understand exactly why it is or is not ready.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added server + client row detail contract with issue severity/reasons/next-actions, R2 preview refs, normalized fields, and lifecycle history.
+- Refactored `RowInspector.tsx` into a server-backed diagnostic console (explicit loading/error states, empty evidence states, no prototype fallbacks).
+- Preserved return context from triage to row inspector via route state and fallback query propagation.
+- Added focused route tests and validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/server/bulk-sku-api.ts
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/routes/pages/RowInspector.tsx
+- apps/web/src/routes/pages/TriageWorkspace.tsx
+- apps/web/src/test/row-inspector.test.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-3-show-row-detail-with-blocker-warning-and-lifecycle-reasoning.md
+
+## Change Log
+
+- 2026-05-03: Implemented server-backed row inspector with issue reasoning, lifecycle context, evidence sections, and tests.

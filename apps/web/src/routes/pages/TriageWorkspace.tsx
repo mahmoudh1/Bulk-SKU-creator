@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -51,6 +51,7 @@ function issuePreview(row: BatchReadinessRowDto) {
 export default function TriageWorkspace() {
   const { id } = useParams();
   const { activeWorkspace } = useOrganizationContext();
+  const location = useLocation();
   const [search, setSearch] = useState("");
   const [readinessFilter, setReadinessFilter] = useState<ReadinessState | "ALL">("ALL");
   const [onlyIssues, setOnlyIssues] = useState(false);
@@ -70,6 +71,7 @@ export default function TriageWorkspace() {
     [evaluation],
   );
   const batchId = id ?? "";
+  const returnContext = `${location.pathname}${location.search}`;
 
   const filteredRows = useMemo(() => {
     const base = rows.filter((row) => rowMatchesSearch(row, search));
@@ -344,6 +346,7 @@ export default function TriageWorkspace() {
               </div>
               <Link
                 to={appPaths.batchRow(batchId, selected.rowId)}
+                state={{ from: returnContext }}
                 className="text-xs h-8 px-2.5 rounded-sm border border-border hover:bg-muted inline-flex items-center gap-1 shrink-0"
               >
                 Open <ExternalLink className="h-3 w-3" />
@@ -395,7 +398,11 @@ export default function TriageWorkspace() {
                 </ol>
               </section>
 
-              <Link to={appPaths.batchRow(batchId, selected.rowId)} className="flex items-center justify-between text-sm text-primary hover:underline">
+              <Link
+                to={appPaths.batchRow(batchId, selected.rowId)}
+                state={{ from: returnContext }}
+                className="flex items-center justify-between text-sm text-primary hover:underline"
+              >
                 <span>Open full row inspector</span>
                 <ChevronRight className="h-4 w-4" />
               </Link>

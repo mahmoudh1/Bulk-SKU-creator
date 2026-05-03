@@ -956,6 +956,46 @@ export interface EvaluateBatchReadinessInput {
   organizationId: string;
 }
 
+export type RowIssueSeverity = "BLOCKER" | "WARNING";
+
+export interface RowIssueDetailDto {
+  severity: RowIssueSeverity;
+  code: string;
+  reason: string;
+  nextActionLabel: string;
+  nextActionHref?: string;
+}
+
+export interface RowLifecycleEntryDto {
+  timestamp: string;
+  lifecycleStage: RowLifecycleStage;
+  readinessState: ReadinessState;
+  summary: string;
+}
+
+export interface BatchReadinessRowDetailDto {
+  rowId: string;
+  batchId: string;
+  organizationId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  intakeAttempt: number;
+  rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issues: RowIssueDetailDto[];
+  issueSummaries: ReadinessIssueSummaryDto[];
+  imageEvidence: ReadinessImageEvidenceDto[];
+  normalizedFields: NormalizedFieldDto[];
+  originalImageIds: string[];
+  lifecycleHistory: RowLifecycleEntryDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
 const batchReadinessStorageKey = "bulk-sku-creator:batch-readiness-evaluations:v1";
 
 function readStoredReadiness(): Record<string, BatchReadinessEvaluationDto> {
@@ -1142,4 +1182,110 @@ export async function getBatchReadiness({ batchId, organizationId }: EvaluateBat
   }
 
   return readiness;
+}
+
+function lifecycleSummary(stage: RowLifecycleStage, readiness: ReadinessState) {
+  if (stage === "READY_FOR_SUBMISSION_PREP" && readiness === "READY") {
+    return "Row is ready for submission prep.";
+  }
+
+  if (stage === "NEEDS_CORRECTION") {
+    return "Row needs correction before submission prep.";
+  }
+
+  if (stage === "READINESS_EVALUATED") {
+    return "Row readiness evaluated.";
+  }
+
+  return "Row is intake-ready.";
+}
+
+function buildRowIssues(input: { issueSummaries: ReadinessIssueSummaryDto[]; readinessState: ReadinessState; batchId: string; rowId: string }): RowIssueDetailDto[] {
+  return input.issueSummaries.map((issue) => {
+    const needsCorrection = input.readinessState !== "READY" && input.readinessState !== "READY_WITH_AUGMENTATION";
+    const nextActionLabel = needsCorrection ? "Review correction path" : "Review readiness state";
+    const nextActionHref = needsCorrection ? `/batches/${encodeURIComponent(input.batchId)}/mapping?correction=${encodeURIComponent(input.rowId)}` : undefined;
+
+    return {
+      severity: needsCorrection ? "BLOCKER" : "WARNING",
+      code: issue.code,
+      reason: issue.message,
+      nextActionLabel,
+      nextActionHref,
+    };
+  });
+}
+
+export interface GetBatchRowDetailInput {
+  batchId: string;
+  rowId: string;
+  organizationId: string;
+}
+
+export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetBatchRowDetailInput): Promise<BatchReadinessRowDetailDto> {
+  if (!batchId || !rowId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Row detail requires a batch, row, and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(
+      `/api/batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    );
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessRowDetailDto;
+  }
+
+  const readiness = loadStoredReadiness(batchId, organizationId);
+  const review = loadStoredReview(batchId, organizationId);
+
+  const readinessRow = readiness?.rows.find((row) => row.rowId === rowId);
+
+  if (!readinessRow || !readiness) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Row detail was not found. Run readiness evaluation before opening the inspector.",
+    } satisfies BatchApiError;
+  }
+
+  const intakeRow =
+    review?.rows.find((row) => row.rowId === rowId && row.rowRevision === readinessRow.rowRevision) ??
+    review?.rows.find((row) => row.rowId === rowId) ??
+    null;
+
+  const issueSummaries = readinessRow.issueSummaries;
+  const lifecycleHistory: RowLifecycleEntryDto[] = [
+    {
+      timestamp: readinessRow.updatedAt,
+      lifecycleStage: readinessRow.lifecycleStage,
+      readinessState: readinessRow.readinessState,
+      summary: lifecycleSummary(readinessRow.lifecycleStage, readinessRow.readinessState),
+    },
+  ];
+
+  return {
+    rowId: readinessRow.rowId,
+    batchId,
+    organizationId,
+    sourceRowNumber: readinessRow.sourceRowNumber,
+    sourceRowKey: readinessRow.sourceRowKey,
+    intakeAttempt: intakeRow?.intakeAttempt ?? 1,
+    rowRevision: readinessRow.rowRevision,
+    sku: readinessRow.sku,
+    productName: readinessRow.productName,
+    brand: readinessRow.brand,
+    readinessState: readinessRow.readinessState,
+    lifecycleStage: readinessRow.lifecycleStage,
+    issueSummaries,
+    issues: buildRowIssues({ issueSummaries, readinessState: readinessRow.readinessState, batchId, rowId }),
+    imageEvidence: readinessRow.imageEvidence,
+    normalizedFields: intakeRow?.normalizedFields ?? [],
+    originalImageIds: intakeRow?.originalImageIds ?? [],
+    lifecycleHistory,
+    evaluatedAt: readiness.evaluatedAt,
+    updatedAt: readinessRow.updatedAt,
+  };
 }

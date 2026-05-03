@@ -152,6 +152,46 @@ interface BatchReadinessEvaluationDto {
   updatedAt: string;
 }
 
+type RowIssueSeverity = "BLOCKER" | "WARNING";
+
+interface RowIssueDetailDto {
+  severity: RowIssueSeverity;
+  code: string;
+  reason: string;
+  nextActionLabel: string;
+  nextActionHref?: string;
+}
+
+interface RowLifecycleEntryDto {
+  timestamp: string;
+  lifecycleStage: RowLifecycleStage;
+  readinessState: ReadinessState;
+  summary: string;
+}
+
+interface BatchReadinessRowDetailDto {
+  rowId: string;
+  batchId: string;
+  organizationId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  intakeAttempt: number;
+  rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issues: RowIssueDetailDto[];
+  issueSummaries: ReadinessIssueSummaryDto[];
+  imageEvidence: ReadinessImageEvidenceDto[];
+  normalizedFields: BatchIntakeReviewDto["rows"][number]["normalizedFields"];
+  originalImageIds: string[];
+  lifecycleHistory: RowLifecycleEntryDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
 const requiredColumns = ["sku", "name", "brand", "image_id"] as const;
 const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -1178,6 +1218,148 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
   sendJson(res, 200, { batchId, organizationId, rows, summary, evaluatedAt, updatedAt } satisfies BatchReadinessEvaluationDto);
 }
 
+function buildRowIssues(
+  row: Pick<BatchReadinessRowDetailDto, "issueSummaries" | "readinessState" | "batchId" | "rowId">,
+): RowIssueDetailDto[] {
+  return row.issueSummaries.map((issue) => {
+    const needsCorrection = row.readinessState !== "READY" && row.readinessState !== "READY_WITH_AUGMENTATION";
+    const nextActionLabel = needsCorrection ? "Review correction path" : "Review readiness state";
+    const nextActionHref = needsCorrection ? `/batches/${encodeURIComponent(row.batchId)}/mapping?correction=${encodeURIComponent(row.rowId)}` : undefined;
+
+    return {
+      severity: needsCorrection ? "BLOCKER" : "WARNING",
+      code: issue.code,
+      reason: issue.message,
+      nextActionLabel,
+      nextActionHref,
+    };
+  });
+}
+
+function lifecycleSummary(stage: RowLifecycleStage, readiness: ReadinessState) {
+  if (stage === "READY_FOR_SUBMISSION_PREP" && readiness === "READY") {
+    return "Row is ready for submission prep.";
+  }
+
+  if (stage === "NEEDS_CORRECTION") {
+    return "Row needs correction before submission prep.";
+  }
+
+  if (stage === "READINESS_EVALUATED") {
+    return "Row readiness evaluated.";
+  }
+
+  return "Row is intake-ready.";
+}
+
+async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, batchId: string, rowId: string) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const organizationId = url.searchParams.get("organizationId") ?? "";
+
+  if (!organizationId) {
+    return sendError(res, 400, "MISSING_ORGANIZATION", "Select an active workspace before fetching row detail.");
+  }
+
+  const readinessResult = await getPool().query<{
+    row_id: string;
+    source_row_number: number;
+    source_row_key: string;
+    row_revision: number;
+    sku: string;
+    product_name: string;
+    brand: string;
+    readiness_state: ReadinessState;
+    lifecycle_stage: RowLifecycleStage;
+    issue_summaries: ReadinessIssueSummaryDto[];
+    evidence: ReadinessImageEvidenceDto[];
+    evaluated_at: string;
+    updated_at: string;
+  }>(
+    `select
+        row_id,
+        source_row_number,
+        source_row_key,
+        row_revision,
+        sku,
+        product_name,
+        brand,
+        readiness_state,
+        lifecycle_stage,
+        issue_summaries,
+        evidence,
+        evaluated_at::text,
+        updated_at::text
+      from batch_readiness_results
+      where organization_id = $1 and batch_id = $2 and row_id = $3
+      order by row_revision desc
+      limit 1`,
+    [organizationId, batchId, rowId],
+  );
+
+  const readiness = readinessResult.rows[0];
+
+  if (!readiness) {
+    return sendError(res, 404, "INTAKE_FAILED", "Row detail was not found. Confirm the batch has been evaluated and the row ID is valid.");
+  }
+
+  const review = await readReview(batchId, organizationId);
+
+  const intakeRow =
+    review?.rows.find((row) => row.rowId === rowId && row.rowRevision === readiness.row_revision) ??
+    review?.rows.find((row) => row.rowId === rowId) ??
+    null;
+
+  const historyResult = await getPool().query<{
+    lifecycle_stage: RowLifecycleStage;
+    readiness_state: ReadinessState;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `select lifecycle_stage, readiness_state, created_at::text, updated_at::text
+       from batch_row_lifecycle_events
+      where organization_id = $1 and batch_id = $2 and row_id = $3
+      order by updated_at desc`,
+    [organizationId, batchId, rowId],
+  );
+
+  const lifecycleHistory: RowLifecycleEntryDto[] = historyResult.rows.map((entry) => ({
+    timestamp: entry.updated_at,
+    lifecycleStage: entry.lifecycle_stage,
+    readinessState: entry.readiness_state,
+    summary: lifecycleSummary(entry.lifecycle_stage, entry.readiness_state),
+  }));
+
+  const detail: BatchReadinessRowDetailDto = {
+    rowId,
+    batchId,
+    organizationId,
+    sourceRowNumber: readiness.source_row_number,
+    sourceRowKey: readiness.source_row_key,
+    intakeAttempt: intakeRow?.intakeAttempt ?? 1,
+    rowRevision: readiness.row_revision,
+    sku: readiness.sku ?? intakeRow?.sku ?? "",
+    productName: readiness.product_name ?? intakeRow?.productName ?? "",
+    brand: readiness.brand ?? intakeRow?.brand ?? "",
+    readinessState: readiness.readiness_state,
+    lifecycleStage: readiness.lifecycle_stage,
+    issueSummaries: Array.isArray(readiness.issue_summaries) ? readiness.issue_summaries : [],
+    issues: buildRowIssues({
+      issueSummaries: Array.isArray(readiness.issue_summaries) ? readiness.issue_summaries : [],
+      readinessState: readiness.readiness_state,
+      batchId,
+      rowId,
+    }),
+    imageEvidence: Array.isArray(readiness.evidence) ? readiness.evidence : [],
+    normalizedFields: intakeRow?.normalizedFields ?? [],
+    originalImageIds: intakeRow?.originalImageIds ?? [],
+    lifecycleHistory,
+    evaluatedAt: readiness.evaluated_at,
+    updatedAt: readiness.updated_at,
+  };
+
+  sendJson(res, 200, detail);
+}
+
 async function routeApi(req: IncomingMessage, res: ServerResponse) {
   await ensureSchema();
 
@@ -1218,6 +1400,12 @@ async function routeApi(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === "POST" && readinessEvaluateMatch) {
     return handleEvaluateReadiness(req, res, readinessEvaluateMatch[1]);
+  }
+
+  const readinessRowMatch = pathname.match(/^\/api\/batches\/([^/]+)\/rows\/([^/]+)$/);
+
+  if (req.method === "GET" && readinessRowMatch) {
+    return handleGetRowDetail(req, res, readinessRowMatch[1], decodeURIComponent(readinessRowMatch[2]));
   }
 
   const readinessMatch = pathname.match(/^\/api\/batches\/([^/]+)\/readiness$/);
