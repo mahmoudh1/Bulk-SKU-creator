@@ -1,6 +1,6 @@
 # Story 3.2: Build the Batch Triage Workspace and Status-First Review Grid
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
