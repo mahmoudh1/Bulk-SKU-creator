@@ -924,6 +924,9 @@ export interface BatchReadinessRowDto {
   sourceRowNumber: number;
   sourceRowKey: string;
   rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
   readinessState: ReadinessState;
   lifecycleStage: RowLifecycleStage;
   issueSummaries: ReadinessIssueSummaryDto[];
@@ -992,13 +995,21 @@ function loadStoredReadiness(batchId: string, organizationId: string) {
   return evaluation;
 }
 
-function readinessStableHash(row: Pick<BatchReadinessRowDto, "readinessState" | "lifecycleStage" | "issueSummaries" | "imageEvidence" | "rowRevision">) {
+function readinessStableHash(
+  row: Pick<
+    BatchReadinessRowDto,
+    "readinessState" | "lifecycleStage" | "issueSummaries" | "imageEvidence" | "rowRevision" | "sku" | "productName" | "brand"
+  >,
+) {
   return JSON.stringify({
     readinessState: row.readinessState,
     lifecycleStage: row.lifecycleStage,
     issueSummaries: row.issueSummaries,
     imageEvidence: row.imageEvidence,
     rowRevision: row.rowRevision,
+    sku: row.sku,
+    productName: row.productName,
+    brand: row.brand,
   });
 }
 
@@ -1017,6 +1028,9 @@ function evaluateReadinessRow(row: BatchIntakeRowDto): Omit<BatchReadinessRowDto
     sourceRowNumber: row.sourceRowNumber,
     sourceRowKey: row.sourceRowKey,
     rowRevision: row.rowRevision,
+    sku: row.sku,
+    productName: row.productName,
+    brand: row.brand,
     readinessState,
     lifecycleStage,
     issueSummaries,

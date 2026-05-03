@@ -1,20 +1,12 @@
 import { Link, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { appPaths } from "@/app/routes/paths";
+import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
 import { StatusChip, SubmissionChip } from "@/components/StatusChip";
-import { rows, batches } from "@/data/mock";
-import { prototypeBatchId, prototypeRowId } from "@/lib/mocks/route-defaults";
-import { ArrowRight, Search, Filter, Send, Sparkles, AlertOctagon, ExternalLink, X, ChevronRight, RotateCw } from "lucide-react";
-
-const filterChips = [
-  { label: "All rows", count: 248, active: true },
-  { label: "Ready", count: 162, tone: "ready" },
-  { label: "Ready · augmented", count: 31, tone: "augmented" },
-  { label: "Needs input", count: 28, tone: "needs-input" },
-  { label: "Blocked", count: 19, tone: "blocked" },
-  { label: "Not enough data", count: 8, tone: "blocked" },
-];
+import { Search, Filter, Send, Sparkles, AlertOctagon, ExternalLink, X, ChevronRight, RotateCw } from "lucide-react";
+import { getBatchReadiness, type BatchReadinessRowDto, type ReadinessState } from "@/lib/api-client/batches";
 
 const toneCls: Record<string, string> = {
   ready: "border-status-ready-border text-status-ready",
@@ -23,53 +15,182 @@ const toneCls: Record<string, string> = {
   blocked: "border-status-blocked-border text-status-blocked",
 };
 
+const readinessPriority: Record<ReadinessState, number> = {
+  BLOCKED_FOR_REVIEW: 0,
+  NOT_ENOUGH_DATA: 1,
+  NEEDS_INPUT: 2,
+  READY_WITH_AUGMENTATION: 3,
+  READY: 4,
+};
+
+function formatUpdatedAt(value: string) {
+  const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return isoMatch ? isoMatch[2] : value;
+}
+
+function rowMatchesSearch(row: BatchReadinessRowDto, query: string) {
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return (
+    row.rowId.toLowerCase().includes(normalized) ||
+    row.sku.toLowerCase().includes(normalized) ||
+    row.productName.toLowerCase().includes(normalized) ||
+    row.brand.toLowerCase().includes(normalized)
+  );
+}
+
+function issuePreview(row: BatchReadinessRowDto) {
+  const [first] = row.issueSummaries;
+  return first?.message ?? null;
+}
+
 export default function TriageWorkspace() {
-  const { id = prototypeBatchId } = useParams();
-  const batch = batches.find((b) => b.id === id) ?? batches[0];
-  const [selected, setSelected] = useState(rows.find((row) => row.id === prototypeRowId) ?? rows[0]);
+  const { id } = useParams();
+  const { activeWorkspace } = useOrganizationContext();
+  const [search, setSearch] = useState("");
+  const [readinessFilter, setReadinessFilter] = useState<ReadinessState | "ALL">("ALL");
+  const [onlyIssues, setOnlyIssues] = useState(false);
+  const [sort, setSort] = useState<"priority" | "updated">("priority");
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+
+  const readinessQuery = useQuery({
+    queryKey: ["batchReadiness", id, activeWorkspace?.id],
+    queryFn: () => getBatchReadiness({ batchId: id ?? "", organizationId: activeWorkspace?.id ?? "" }),
+    enabled: Boolean(id && activeWorkspace?.id),
+  });
+
+  const evaluation = readinessQuery.data;
+  const rows = useMemo(() => evaluation?.rows ?? [], [evaluation]);
+  const summary = useMemo(
+    () => evaluation?.summary ?? { totalRows: 0, ready: 0, readyAugmented: 0, needsInput: 0, blocked: 0, notEnoughData: 0 },
+    [evaluation],
+  );
+  const batchId = id ?? "";
+
+  const filteredRows = useMemo(() => {
+    const base = rows.filter((row) => rowMatchesSearch(row, search));
+    const readinessFiltered = readinessFilter === "ALL" ? base : base.filter((row) => row.readinessState === readinessFilter);
+    const issueFiltered = onlyIssues ? readinessFiltered.filter((row) => row.issueSummaries.length > 0 || row.readinessState !== "READY") : readinessFiltered;
+
+    if (sort === "updated") {
+      return [...issueFiltered].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    }
+
+    return [...issueFiltered].sort((a, b) => {
+      const priority = readinessPriority[a.readinessState] - readinessPriority[b.readinessState];
+
+      if (priority !== 0) {
+        return priority;
+      }
+
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+  }, [onlyIssues, readinessFilter, rows, search, sort]);
+
+  const selected = useMemo(() => {
+    const match = selectedRowId ? rows.find((row) => row.rowId === selectedRowId) : null;
+    return match ?? filteredRows[0] ?? null;
+  }, [filteredRows, rows, selectedRowId]);
+
+  const readyForSubmission = summary.blocked + summary.needsInput + summary.notEnoughData === 0;
+
+  const filterChips = useMemo(
+    () => [
+      { label: "All rows", value: "ALL" as const, count: summary.totalRows },
+      { label: "Ready", value: "READY" as const, count: summary.ready, tone: "ready" as const },
+      { label: "Ready · augmented", value: "READY_WITH_AUGMENTATION" as const, count: summary.readyAugmented, tone: "augmented" as const },
+      { label: "Needs input", value: "NEEDS_INPUT" as const, count: summary.needsInput, tone: "needs-input" as const },
+      { label: "Blocked", value: "BLOCKED_FOR_REVIEW" as const, count: summary.blocked, tone: "blocked" as const },
+      { label: "Not enough data", value: "NOT_ENOUGH_DATA" as const, count: summary.notEnoughData, tone: "blocked" as const },
+    ],
+    [summary],
+  );
+
+  if (!batchId) {
+    return (
+      <div className="p-6">
+        <div className="rounded-sm border border-status-blocked-border bg-status-blocked-bg p-4 text-sm text-status-blocked" role="alert">
+          Select a batch before opening triage.
+        </div>
+      </div>
+    );
+  }
+
+  if (readinessQuery.isLoading) {
+    return (
+      <div className="grid min-h-[320px] place-items-center p-6">
+        <div className="text-sm text-muted-foreground" role="status">
+          Loading batch readiness...
+        </div>
+      </div>
+    );
+  }
+
+  if (readinessQuery.isError || !evaluation || !selected) {
+    const message =
+      typeof readinessQuery.error === "object" && readinessQuery.error && "message" in readinessQuery.error
+        ? String(readinessQuery.error.message)
+        : "Batch readiness could not load. Run readiness evaluation or try again.";
+
+    return (
+      <div className="p-6">
+        <div className="rounded-sm border border-status-blocked-border bg-status-blocked-bg p-4 text-sm text-status-blocked" role="alert">
+          {message}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)]">
-        {/* Batch header */}
         <div className="px-6 pt-5 pb-4 border-b border-border bg-card/40">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs text-muted-foreground label-mono">
-                <span>{batch.id}</span><span>·</span><span>{batch.marketplace}</span><span>·</span><span>Owner {batch.owner}</span>
+                <span>{batchId}</span>
+                <span>·</span>
+                <span>{activeWorkspace?.name ?? "Workspace"}</span>
               </div>
-              <h1 className="mt-1 text-xl font-semibold truncate">{batch.name}</h1>
+              <h1 className="mt-1 text-xl font-semibold truncate">Batch triage</h1>
               <div className="mt-1 flex items-center gap-2 text-xs">
-                <SubmissionChip state={batch.submission} />
-                <span className="text-muted-foreground">Last processed {batch.lastUpdated}</span>
+                <SubmissionChip state="DRAFT" />
+                <span className="text-muted-foreground">Last updated {formatUpdatedAt(evaluation.updatedAt)}</span>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Link
-                to={appPaths.batchAiReview(batch.id)}
+                to={appPaths.batchAiReview(batchId)}
                 className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5"
               >
-                <Sparkles className="h-4 w-4 text-status-augmented" /> AI review (31)
+                <Sparkles className="h-4 w-4 text-status-augmented" /> AI review
               </Link>
-              <button className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5">
+              <button type="button" className="h-9 px-3 rounded-sm border border-border bg-card text-sm hover:bg-muted inline-flex items-center gap-1.5" disabled>
                 <RotateCw className="h-4 w-4" /> Re-validate
               </button>
               <Link
-                to={appPaths.batchSubmit(batch.id)}
-                className="h-9 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover inline-flex items-center gap-1.5"
+                to={appPaths.batchSubmit(batchId)}
+                aria-disabled={readyForSubmission ? undefined : "true"}
+                tabIndex={readyForSubmission ? undefined : -1}
+                className={`h-9 px-3 rounded-sm text-sm font-medium inline-flex items-center gap-1.5 ${
+                  readyForSubmission ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "cursor-not-allowed border border-border bg-muted text-muted-foreground"
+                }`}
               >
                 <Send className="h-4 w-4" /> Prepare submission
               </Link>
             </div>
           </div>
 
-          {/* Status summary bar */}
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {[
-              { l: "Ready", v: 162, c: "bg-status-ready" },
-              { l: "Ready · augmented", v: 31, c: "bg-status-augmented" },
-              { l: "Needs input", v: 28, c: "bg-status-needs-input" },
-              { l: "Blocked", v: 19, c: "bg-status-blocked" },
-              { l: "Not enough data", v: 8, c: "bg-status-blocked/70" },
+              { l: "Ready", v: summary.ready, c: "bg-status-ready" },
+              { l: "Ready · augmented", v: summary.readyAugmented, c: "bg-status-augmented" },
+              { l: "Needs input", v: summary.needsInput, c: "bg-status-needs-input" },
+              { l: "Blocked", v: summary.blocked, c: "bg-status-blocked" },
+              { l: "Not enough data", v: summary.notEnoughData, c: "bg-status-blocked/70" },
               { l: "Submitted", v: 0, c: "bg-status-submitted" },
             ].map((s) => (
               <div key={s.l} className="panel px-3 py-2">
@@ -82,43 +203,76 @@ export default function TriageWorkspace() {
             ))}
           </div>
 
-          {/* Guided priority banner */}
-          <div className="mt-3 flex items-start gap-3 rounded-sm border border-status-needs-input-border bg-status-needs-input-bg/60 px-3 py-2.5 text-sm">
-            <AlertOctagon className="h-4 w-4 mt-0.5 text-status-needs-input shrink-0" />
-            <div className="flex-1">
-              <span className="font-medium text-foreground">Fix these first:</span>
-              <span className="text-foreground/80"> 19 GTIN/structure blockers, then 28 missing-unit confirmations. Estimated 25 minutes to clear before submission scope freeze.</span>
+          {summary.blocked + summary.needsInput + summary.notEnoughData > 0 ? (
+            <div className="mt-3 flex items-start gap-3 rounded-sm border border-status-needs-input-border bg-status-needs-input-bg/60 px-3 py-2.5 text-sm">
+              <AlertOctagon className="h-4 w-4 mt-0.5 text-status-needs-input shrink-0" />
+              <div className="flex-1">
+                <span className="font-medium text-foreground">Fix these first:</span>
+                <span className="text-foreground/80"> {summary.blocked} blocked rows, then {summary.needsInput} needs input.</span>
+              </div>
+              <button type="button" onClick={() => setOnlyIssues(true)} className="text-xs text-primary hover:underline shrink-0">
+                Show only blockers
+              </button>
             </div>
-            <button className="text-xs text-primary hover:underline shrink-0">Show only blockers</button>
-          </div>
+          ) : null}
         </div>
 
-        {/* Body: table + side panel */}
         <div className="flex-1 grid grid-cols-1 xl:grid-cols-[1fr_420px] min-h-0">
-          {/* Triage table */}
           <div className="flex flex-col min-w-0 border-r border-border">
-            {/* Filters */}
             <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-border bg-card/40">
               <div className="flex items-center gap-2 px-2 h-8 rounded-sm border border-border bg-background w-72">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <input className="flex-1 bg-transparent text-sm outline-none" placeholder="Row ID, SKU, product name…" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none"
+                  placeholder="Row ID, SKU, product name…"
+                />
               </div>
               <button className="h-8 px-2.5 rounded-sm border border-border bg-background text-xs hover:bg-muted inline-flex items-center gap-1.5">
                 <Filter className="h-3 w-3" /> Add filter
               </button>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  Sort
+                  <select
+                    value={sort}
+                    onChange={(event) => setSort(event.target.value as "priority" | "updated")}
+                    className="h-8 rounded-sm border border-border bg-background px-2 text-xs text-foreground"
+                  >
+                    <option value="priority">Priority</option>
+                    <option value="updated">Updated</option>
+                  </select>
+                </label>
+                {onlyIssues ? (
+                  <button type="button" onClick={() => setOnlyIssues(false)} className="h-8 px-2.5 rounded-sm border border-border bg-background text-xs hover:bg-muted inline-flex items-center gap-1.5">
+                    <X className="h-3 w-3" />
+                    Clear blockers
+                  </button>
+                ) : null}
+              </div>
               <div className="flex items-center gap-1.5 ml-1 overflow-x-auto">
-                {filterChips.map((f) => (
-                  <button key={f.label}
-                    className={`h-7 px-2.5 rounded-sm text-xs whitespace-nowrap border inline-flex items-center gap-1.5 ${
-                      f.active ? "bg-primary text-primary-foreground border-primary" :
-                      f.tone ? `bg-card hover:bg-muted ${toneCls[f.tone]}` : "bg-card border-border hover:bg-muted"
-                    }`}>
+                {filterChips.map((f) => {
+                  const active = readinessFilter === f.value;
+
+                  return (
+                    <button
+                      key={f.label}
+                      type="button"
+                      onClick={() => setReadinessFilter(f.value)}
+                      className={`h-7 px-2.5 rounded-sm text-xs whitespace-nowrap border inline-flex items-center gap-1.5 ${
+                        active ? "bg-primary text-primary-foreground border-primary" : f.tone ? `bg-card hover:bg-muted ${toneCls[f.tone]}` : "bg-card border-border hover:bg-muted"
+                      }`}
+                    >
                     <span>{f.label}</span>
                     <span className="tabular-nums opacity-80">{f.count}</span>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="ml-auto text-xs text-muted-foreground">Showing 14 of 248</div>
+              <div className="ml-auto text-xs text-muted-foreground">
+                Showing {filteredRows.length} of {summary.totalRows}
+              </div>
             </div>
 
             <div className="flex-1 overflow-auto">
@@ -136,35 +290,33 @@ export default function TriageWorkspace() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {rows.map((r) => {
-                    const isSel = selected.id === r.id;
+                  {filteredRows.map((r) => {
+                    const isSel = selected.rowId === r.rowId;
+                    const blockerText = issuePreview(r);
                     return (
-                      <tr key={r.id}
-                          onClick={() => setSelected(r)}
+                      <tr key={r.rowId}
+                          onClick={() => setSelectedRowId(r.rowId)}
                           className={`cursor-pointer ${isSel ? "bg-status-submitted-bg/60" : "hover:bg-muted/40"}`}>
                         <td className="px-3 py-2.5"><input type="checkbox" className="accent-primary" onClick={(e) => e.stopPropagation()} /></td>
                         <td className="px-2 py-2.5">
-                          <div className="label-mono normal-case text-foreground">{r.id}</div>
+                          <div className="label-mono normal-case text-foreground">{r.rowId}</div>
                           <div className="text-[11px] text-muted-foreground">{r.sku}</div>
                         </td>
                         <td className="px-2 py-2.5 max-w-[280px]">
                           <div className="font-medium truncate">{r.productName}</div>
-                          <div className="text-[11px] text-muted-foreground">{r.brand} · {r.imagesCount} images</div>
+                          <div className="text-[11px] text-muted-foreground">{r.brand} · {r.imageEvidence.length} images</div>
                         </td>
-                        <td className="px-2 py-2.5"><StatusChip status={r.status} /></td>
+                        <td className="px-2 py-2.5"><StatusChip status={r.readinessState} /></td>
                         <td className="px-2 py-2.5 text-xs text-muted-foreground max-w-[280px] truncate">
-                          {r.blocker ?? <span className="text-status-ready">All checks passed</span>}
+                          {blockerText ? blockerText : <span className="text-status-ready">All checks passed</span>}
                         </td>
                         <td className="px-2 py-2.5">
-                          {r.aiState === "NONE"
-                            ? <span className="text-[11px] text-muted-foreground">—</span>
-                            : <span className="inline-flex items-center gap-1 text-[11px] text-status-augmented"><Sparkles className="h-3 w-3"/>{r.aiState.toLowerCase()}</span>}
+                          <span className="text-[11px] text-muted-foreground">—</span>
                         </td>
                         <td className="px-2 py-2.5">
-                          <div className="text-xs text-foreground">{r.productType}</div>
-                          <div className="text-[11px] text-muted-foreground tabular-nums">conf {(r.productTypeConfidence*100).toFixed(0)}%</div>
+                          <div className="text-xs text-muted-foreground">—</div>
                         </td>
-                        <td className="px-2 py-2.5 text-right text-xs text-muted-foreground tabular-nums">{r.updatedAt}</td>
+                        <td className="px-2 py-2.5 text-right text-xs text-muted-foreground tabular-nums">{formatUpdatedAt(r.updatedAt)}</td>
                       </tr>
                     );
                   })}
@@ -172,28 +324,26 @@ export default function TriageWorkspace() {
               </table>
             </div>
 
-            {/* Bulk action bar */}
             <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-border bg-muted/40 text-sm">
               <span className="text-muted-foreground">Select rows for bulk action</span>
               <div className="flex items-center gap-2">
-                <button className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted">Re-validate</button>
-                <button className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted">Accept AI drafts</button>
-                <button className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted">Defer</button>
-                <button className="h-8 px-2.5 rounded-sm border border-status-blocked-border text-status-blocked bg-status-blocked-bg text-xs hover:opacity-90">Exclude</button>
+                <button type="button" className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted" disabled>Re-validate</button>
+                <button type="button" className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted" disabled>Accept AI drafts</button>
+                <button type="button" className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted" disabled>Defer</button>
+                <button type="button" className="h-8 px-2.5 rounded-sm border border-status-blocked-border text-status-blocked bg-status-blocked-bg text-xs hover:opacity-90" disabled>Exclude</button>
               </div>
             </div>
           </div>
 
-          {/* Side panel: row preview */}
           <aside className="bg-card overflow-y-auto">
             <header className="flex items-start justify-between gap-3 px-4 py-3 border-b border-border sticky top-0 bg-card z-10">
               <div className="min-w-0">
-                <div className="label-mono normal-case">{selected.id} · {selected.sku}</div>
+                <div className="label-mono normal-case">{selected.rowId} · {selected.sku}</div>
                 <div className="font-medium truncate">{selected.productName}</div>
-                <div className="mt-1.5"><StatusChip status={selected.status} /></div>
+                <div className="mt-1.5"><StatusChip status={selected.readinessState} /></div>
               </div>
               <Link
-                to={appPaths.batchRow(batch.id, selected.id)}
+                to={appPaths.batchRow(batchId, selected.rowId)}
                 className="text-xs h-8 px-2.5 rounded-sm border border-border hover:bg-muted inline-flex items-center gap-1 shrink-0"
               >
                 Open <ExternalLink className="h-3 w-3" />
@@ -204,16 +354,14 @@ export default function TriageWorkspace() {
               <section>
                 <h3 className="label-mono mb-2">Blocker / next action</h3>
                 <div className="rounded-sm border border-status-needs-input-border bg-status-needs-input-bg/50 p-3 text-sm">
-                  <div className="font-medium text-foreground">{selected.blocker ?? "All validation checks passed."}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Source listed capacity as <code className="bg-card px-1 rounded-sm">"1L"</code> in description but capacity unit column is empty.
-                    Confirm <strong>liter (L)</strong> to proceed.
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <button className="h-8 px-2.5 rounded-sm bg-primary text-primary-foreground text-xs font-medium">Confirm: liter</button>
-                    <button className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted">Confirm: milliliter</button>
-                    <button className="h-8 px-2.5 rounded-sm border border-border bg-card text-xs hover:bg-muted">Other…</button>
-                  </div>
+                  <div className="font-medium text-foreground">{issuePreview(selected) ?? "All validation checks passed."}</div>
+                  {selected.issueSummaries.length > 1 ? (
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {selected.issueSummaries.slice(1, 3).map((issue) => (
+                        <div key={`${issue.code}-${issue.message}`}>{issue.message}</div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </section>
 
@@ -222,10 +370,9 @@ export default function TriageWorkspace() {
                 <dl className="text-sm divide-y divide-border border border-border rounded-sm">
                   {[
                     ["Brand", selected.brand],
-                    ["Product type", `${selected.productType} (conf ${(selected.productTypeConfidence*100).toFixed(0)}%)`],
-                    ["GTIN", selected.gtin ?? "—"],
-                    ["Images", `${selected.imagesCount} matched`],
-                    ["Owner", selected.owner],
+                    ["SKU", selected.sku],
+                    ["Images", `${selected.imageEvidence.length} matched`],
+                    ["Updated", formatUpdatedAt(selected.updatedAt)],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between gap-3 px-3 py-2">
                       <dt className="text-muted-foreground">{k}</dt>
@@ -238,21 +385,17 @@ export default function TriageWorkspace() {
               <section>
                 <h3 className="label-mono mb-2">Evidence trail</h3>
                 <ol className="text-xs space-y-2">
-                  {[
-                    ["08:12", "Validator flagged missing capacity_unit"],
-                    ["08:12", "Stronger model escalation triggered (low confidence)"],
-                    ["08:11", "Image #3 OCR detected '1 L' on packaging — suggestion only"],
-                    ["08:10", "Source row imported from AW25_homekitchen_wave3.xlsx, line 23"],
-                  ].map(([ts, t], i) => (
-                    <li key={i} className="flex gap-3">
-                      <span className="label-mono normal-case text-muted-foreground tabular-nums w-12 shrink-0">{ts}</span>
-                      <span className="text-foreground">{t}</span>
+                  {selected.imageEvidence.slice(0, 4).map((item) => (
+                    <li key={item.imageId} className="flex gap-3">
+                      <span className="label-mono normal-case text-muted-foreground tabular-nums w-12 shrink-0">img</span>
+                      <span className="text-foreground">{item.imageId}</span>
                     </li>
                   ))}
+                  {selected.imageEvidence.length === 0 ? <li className="text-muted-foreground">No image evidence attached.</li> : null}
                 </ol>
               </section>
 
-              <Link to={appPaths.batchRow(batch.id, selected.id)} className="flex items-center justify-between text-sm text-primary hover:underline">
+              <Link to={appPaths.batchRow(batchId, selected.rowId)} className="flex items-center justify-between text-sm text-primary hover:underline">
                 <span>Open full row inspector</span>
                 <ChevronRight className="h-4 w-4" />
               </Link>

@@ -125,6 +125,9 @@ interface BatchReadinessRowDto {
   sourceRowNumber: number;
   sourceRowKey: string;
   rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
   readinessState: ReadinessState;
   lifecycleStage: RowLifecycleStage;
   issueSummaries: ReadinessIssueSummaryDto[];
@@ -278,6 +281,9 @@ async function ensureSchema() {
       source_row_number integer not null,
       source_row_key text not null,
       row_revision integer not null,
+      sku text not null,
+      product_name text not null,
+      brand text not null,
       readiness_state text not null,
       lifecycle_stage text not null,
       issue_summaries jsonb not null default '[]'::jsonb,
@@ -292,6 +298,9 @@ async function ensureSchema() {
 
     alter table batch_readiness_results add column if not exists source_row_number integer;
     alter table batch_readiness_results add column if not exists source_row_key text;
+    alter table batch_readiness_results add column if not exists sku text;
+    alter table batch_readiness_results add column if not exists product_name text;
+    alter table batch_readiness_results add column if not exists brand text;
     alter table batch_readiness_results add column if not exists evaluated_at timestamptz not null default now();
     alter table batch_readiness_results add column if not exists updated_at timestamptz not null default now();
 
@@ -891,6 +900,9 @@ function evaluateReadinessRow(row: BatchIntakeReviewDto["rows"][number]): Omit<B
     sourceRowNumber: row.sourceRowNumber,
     sourceRowKey: row.sourceRowKey,
     rowRevision: row.rowRevision,
+    sku: row.sku,
+    productName: row.productName,
+    brand: row.brand,
     readinessState,
     lifecycleStage,
     issueSummaries,
@@ -931,15 +943,21 @@ async function upsertReadinessRow(
         source_row_number,
         source_row_key,
         row_revision,
+        sku,
+        product_name,
+        brand,
         readiness_state,
         lifecycle_stage,
         issue_summaries,
         evidence
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb)
       on conflict (organization_id, batch_id, row_id, row_revision) do update set
         source_row_number = excluded.source_row_number,
         source_row_key = excluded.source_row_key,
+        sku = excluded.sku,
+        product_name = excluded.product_name,
+        brand = excluded.brand,
         readiness_state = excluded.readiness_state,
         lifecycle_stage = excluded.lifecycle_stage,
         issue_summaries = excluded.issue_summaries,
@@ -947,6 +965,9 @@ async function upsertReadinessRow(
         updated_at = now()
       where batch_readiness_results.source_row_number is distinct from excluded.source_row_number
         or batch_readiness_results.source_row_key is distinct from excluded.source_row_key
+        or batch_readiness_results.sku is distinct from excluded.sku
+        or batch_readiness_results.product_name is distinct from excluded.product_name
+        or batch_readiness_results.brand is distinct from excluded.brand
         or batch_readiness_results.readiness_state is distinct from excluded.readiness_state
         or batch_readiness_results.lifecycle_stage is distinct from excluded.lifecycle_stage
         or batch_readiness_results.issue_summaries is distinct from excluded.issue_summaries
@@ -959,6 +980,9 @@ async function upsertReadinessRow(
       base.sourceRowNumber,
       base.sourceRowKey,
       base.rowRevision,
+      base.sku,
+      base.productName,
+      base.brand,
       base.readinessState,
       base.lifecycleStage,
       issueSummaries,
@@ -1096,6 +1120,9 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
     source_row_number: number;
     source_row_key: string;
     row_revision: number;
+    sku: string;
+    product_name: string;
+    brand: string;
     readiness_state: ReadinessState;
     lifecycle_stage: RowLifecycleStage;
     issue_summaries: ReadinessIssueSummaryDto[];
@@ -1108,6 +1135,9 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
         source_row_number,
         source_row_key,
         row_revision,
+        sku,
+        product_name,
+        brand,
         readiness_state,
         lifecycle_stage,
         issue_summaries,
@@ -1130,6 +1160,9 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
     sourceRowNumber: row.source_row_number,
     sourceRowKey: row.source_row_key,
     rowRevision: row.row_revision,
+    sku: row.sku ?? "",
+    productName: row.product_name ?? "",
+    brand: row.brand ?? "",
     readinessState: row.readiness_state,
     lifecycleStage: row.lifecycle_stage,
     issueSummaries: Array.isArray(row.issue_summaries) ? row.issue_summaries : [],
