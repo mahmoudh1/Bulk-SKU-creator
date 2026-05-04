@@ -1,10 +1,11 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { appPaths } from "@/app/routes/paths";
 import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
 import { StatusChip } from "@/components/StatusChip";
-import { getBatchRowDetail } from "@/lib/api-client/batches";
+import { correctBatchRow, getBatchRowDetail } from "@/lib/api-client/batches";
 import { ArrowLeft, AlertTriangle, ExternalLink, FileSearch, ImageIcon, Sparkles, XCircle, Clock } from "lucide-react";
 
 export default function RowInspector() {
@@ -12,6 +13,7 @@ export default function RowInspector() {
   const { activeWorkspace } = useOrganizationContext();
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from;
+  const queryClient = useQueryClient();
 
   const rowQuery = useQuery({
     queryKey: ["batchRowDetail", id, rowId, activeWorkspace?.id],
@@ -20,6 +22,64 @@ export default function RowInspector() {
   });
 
   const backTarget = from ?? `${appPaths.batchReview(id)}${location.search}`;
+  const detail = rowQuery.data;
+  const initialGtin = useMemo(
+    () => detail?.normalizedFields.find((field) => field.field === "gtin")?.normalizedValue ?? "",
+    [detail?.normalizedFields],
+  );
+
+  const [title, setTitle] = useState("");
+  const [brand, setBrand] = useState("");
+  const [gtin, setGtin] = useState("");
+  const [imageIds, setImageIds] = useState("");
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+
+    setTitle(detail.productName);
+    setBrand(detail.brand);
+    setGtin(initialGtin);
+    setImageIds(detail.originalImageIds.join(" "));
+  }, [detail, initialGtin]);
+
+  const correctionMutation = useMutation({
+    mutationFn: async () => {
+      if (!detail) {
+        throw new Error("Row detail must load before applying corrections.");
+      }
+
+      return correctBatchRow({
+        batchId: id,
+        rowId,
+        organizationId: activeWorkspace?.id ?? "",
+        baseRowRevision: detail.rowRevision,
+        patch: {
+          title,
+          brand,
+          gtin,
+          imageIds: imageIds
+            .split(/[;,\\s]+/)
+            .map((value) => value.trim())
+            .filter(Boolean),
+        },
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["batchRowDetail", id, rowId, activeWorkspace?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["batchReadiness", id, activeWorkspace?.id] }),
+      ]);
+    },
+  });
+
+  const hasChanges =
+    detail !== undefined &&
+    (title !== detail.productName ||
+      brand !== detail.brand ||
+      gtin !== initialGtin ||
+      imageIds.trim() !== detail.originalImageIds.join(" "));
 
   if (!id || !rowId) {
     return (
@@ -60,10 +120,8 @@ export default function RowInspector() {
       </div>
     );
   }
-
-  const detail = rowQuery.data;
-  const blockers = detail.issues.filter((issue) => issue.severity === "BLOCKER");
-  const warnings = detail.issues.filter((issue) => issue.severity === "WARNING");
+  const blockers = rowQuery.data.issues.filter((issue) => issue.severity === "BLOCKER");
+  const warnings = rowQuery.data.issues.filter((issue) => issue.severity === "WARNING");
   const primaryIssue = blockers[0] ?? warnings[0] ?? null;
 
   return (
@@ -253,6 +311,61 @@ export default function RowInspector() {
               {primaryIssue?.nextActionLabel ?? "No actions required."}
             </div>
           )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="label-mono">Corrections</div>
+          <label className="block text-xs text-muted-foreground">
+            Title
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-1 h-9 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            Brand
+            <input
+              value={brand}
+              onChange={(event) => setBrand(event.target.value)}
+              className="mt-1 h-9 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            GTIN
+            <input
+              value={gtin}
+              onChange={(event) => setGtin(event.target.value)}
+              className="mt-1 h-9 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground"
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground">
+            Image IDs
+            <input
+              value={imageIds}
+              onChange={(event) => setImageIds(event.target.value)}
+              className="mt-1 h-9 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!hasChanges || correctionMutation.isPending}
+            onClick={() => correctionMutation.mutate()}
+            className={`h-9 w-full rounded-sm text-sm font-medium ${
+              !hasChanges || correctionMutation.isPending
+                ? "cursor-not-allowed border border-border bg-muted text-muted-foreground"
+                : "bg-primary text-primary-foreground hover:bg-primary-hover"
+            }`}
+          >
+            {correctionMutation.isPending ? "Saving..." : "Save & revalidate"}
+          </button>
+          {correctionMutation.isError ? (
+            <div className="rounded-sm border border-status-blocked-border bg-status-blocked-bg p-2 text-xs text-status-blocked" role="alert">
+              {typeof correctionMutation.error === "object" && correctionMutation.error && "message" in correctionMutation.error
+                ? String(correctionMutation.error.message)
+                : "Correction failed. Refresh and try again."}
+            </div>
+          ) : null}
         </div>
         <div className="border-t border-border pt-4 space-y-2">
           <button type="button" disabled className="w-full h-8 rounded-sm border border-border text-sm text-muted-foreground">

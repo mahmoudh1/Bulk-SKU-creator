@@ -469,6 +469,14 @@ function buildRowsFromSource(batchId: string, organizationId: string, rows: Sour
       originalImageIds: imageIds,
       normalizedFields: [
         {
+          field: "sku",
+          label: "SKU",
+          rawValue: sourceValue(sourceRow, "sku"),
+          normalizedValue: sourceValue(sourceRow, "sku") || rowId,
+          confidence: 1,
+          status: "MAPPED",
+        },
+        {
           field: "title",
           label: "Product title",
           rawValue: sourceValue(sourceRow, "name"),
@@ -484,6 +492,30 @@ function buildRowsFromSource(batchId: string, organizationId: string, rows: Sour
           confidence: 1,
           status: "MAPPED",
         },
+        ...(sourceRow.gtin !== undefined
+          ? [
+              {
+                field: "gtin",
+                label: "GTIN",
+                rawValue: sourceValue(sourceRow, "gtin"),
+                normalizedValue: sourceValue(sourceRow, "gtin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.forced_match_asin !== undefined
+          ? [
+              {
+                field: "forced_match_asin",
+                label: "Forced match ASIN",
+                rawValue: sourceValue(sourceRow, "forced_match_asin"),
+                normalizedValue: sourceValue(sourceRow, "forced_match_asin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
       ],
       interpretationStatus: interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW",
       interpretationIssues,
@@ -1222,6 +1254,99 @@ export interface GetBatchRowDetailInput {
   organizationId: string;
 }
 
+export interface CorrectBatchRowInput {
+  batchId: string;
+  rowId: string;
+  organizationId: string;
+  baseRowRevision: number;
+  patch: {
+    title?: string;
+    brand?: string;
+    gtin?: string;
+    forcedMatchAsin?: string;
+    imageIds?: string[];
+  };
+}
+
+function upsertNormalizedField(normalizedFields: NormalizedFieldDto[], field: string, label: string, value: string) {
+  const trimmed = value ?? "";
+  const index = normalizedFields.findIndex((item) => item.field === field);
+  const next = {
+    field,
+    label,
+    rawValue: trimmed,
+    normalizedValue: trimmed,
+    confidence: 1,
+    status: "MAPPED" as const,
+  };
+
+  if (index === -1) {
+    return [...normalizedFields, next];
+  }
+
+  const updated = [...normalizedFields];
+  updated[index] = { ...updated[index], ...next };
+  return updated;
+}
+
+function applyRowPatchLocal(row: BatchIntakeRowDto, organizationId: string, patch: CorrectBatchRowInput["patch"]): BatchIntakeRowDto {
+  let normalizedFields = row.normalizedFields;
+  let productName = row.productName;
+  let brand = row.brand;
+  let originalImageIds = row.originalImageIds;
+  let resolvedAssets = row.resolvedAssets;
+  let imageIssues = row.imageIssues;
+  let interpretationIssues = row.interpretationIssues;
+  let interpretationStatus = row.interpretationStatus;
+
+  if (patch.title !== undefined) {
+    productName = patch.title || "Untitled product";
+    normalizedFields = upsertNormalizedField(normalizedFields, "title", "Product title", patch.title);
+  }
+
+  if (patch.brand !== undefined) {
+    brand = patch.brand || "Unknown brand";
+    normalizedFields = upsertNormalizedField(normalizedFields, "brand", "Brand", patch.brand);
+  }
+
+  if (patch.gtin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "gtin", "GTIN", patch.gtin);
+  }
+
+  if (patch.forcedMatchAsin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "forced_match_asin", "Forced match ASIN", patch.forcedMatchAsin);
+  }
+
+  if (patch.imageIds !== undefined) {
+    originalImageIds = patch.imageIds.filter(Boolean);
+    const images = resolveImageReferences(originalImageIds, organizationId);
+    resolvedAssets = images.resolvedAssets;
+    imageIssues = images.imageIssues;
+    interpretationIssues = imageIssues.map((issue) => ({
+      code: "UNRESOLVED_IMAGE_REFERENCE" as const,
+      label: "Unresolved image reference",
+      field: "image references",
+      message: issue.message,
+      correctionHint: issue.recoveryHint,
+    }));
+    interpretationStatus = interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW";
+  }
+
+  return {
+    ...row,
+    intakeAttempt: row.intakeAttempt + 1,
+    rowRevision: row.rowRevision + 1,
+    productName,
+    brand,
+    originalImageIds,
+    normalizedFields,
+    interpretationStatus,
+    interpretationIssues,
+    resolvedAssets,
+    imageIssues,
+  };
+}
+
 export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetBatchRowDetailInput): Promise<BatchReadinessRowDetailDto> {
   if (!batchId || !rowId || !organizationId) {
     throw { code: "INTAKE_FAILED", message: "Row detail requires a batch, row, and workspace." } satisfies BatchApiError;
@@ -1288,4 +1413,68 @@ export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetB
     evaluatedAt: readiness.evaluatedAt,
     updatedAt: readinessRow.updatedAt,
   };
+}
+
+export async function correctBatchRow(input: CorrectBatchRowInput): Promise<BatchReadinessRowDetailDto> {
+  if (!input.batchId || !input.rowId || !input.organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Row correction requires a batch, row, and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(input.batchId)}/rows/${encodeURIComponent(input.rowId)}/corrections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organizationId: input.organizationId,
+        baseRowRevision: input.baseRowRevision,
+        patch: input.patch,
+      }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    await response.json();
+    return getBatchRowDetail({ batchId: input.batchId, rowId: input.rowId, organizationId: input.organizationId });
+  }
+
+  const review = loadStoredReview(input.batchId, input.organizationId);
+
+  if (!review) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch intake data was not found. Create the batch from a spreadsheet before correcting rows.",
+    } satisfies BatchApiError;
+  }
+
+  const rowIndex = review.rows.findIndex((row) => row.rowId === input.rowId);
+
+  if (rowIndex === -1) {
+    throw { code: "INTAKE_FAILED", message: "Row could not be found for correction." } satisfies BatchApiError;
+  }
+
+  const current = review.rows[rowIndex];
+
+  if (input.baseRowRevision && current.rowRevision !== input.baseRowRevision) {
+    throw { code: "INTAKE_FAILED", message: "Row revision is stale. Refresh before applying corrections." } satisfies BatchApiError;
+  }
+
+  const updatedRow = applyRowPatchLocal(current, input.organizationId, input.patch);
+  const updatedRows = [...review.rows];
+  updatedRows[rowIndex] = updatedRow;
+
+  const updatedReview = finalizeReview({
+    batchId: review.batchId,
+    organizationId: review.organizationId,
+    sourceFile: review.sourceFile,
+    fieldMappings: review.fieldMappings,
+    intakeStatus: resolveReviewStatus(updatedRows),
+    rows: updatedRows,
+  });
+
+  writeStoredReview(updatedReview);
+  await evaluateBatchReadiness({ batchId: input.batchId, organizationId: input.organizationId });
+
+  return getBatchRowDetail({ batchId: input.batchId, rowId: input.rowId, organizationId: input.organizationId });
 }

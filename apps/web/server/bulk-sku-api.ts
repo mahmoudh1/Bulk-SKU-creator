@@ -119,6 +119,22 @@ interface ReadinessImageEvidenceDto {
   previewRef: string;
 }
 
+type ValidationSeverity = "BLOCKER" | "WARNING";
+
+type ValidationCategory = "IDENTIFIER" | "ATTRIBUTE" | "VARIANT" | "IMAGE" | "INTAKE" | "DUPLICATE" | "POLICY";
+
+interface ValidationRuleResultDto {
+  ruleCode: string;
+  category: ValidationCategory;
+  severity: ValidationSeverity;
+  field: string;
+  message: string;
+  remediationHint: string;
+  blocking: boolean;
+  readinessImpact: ReadinessState;
+  evidence?: Record<string, unknown>;
+}
+
 interface BatchReadinessRowDto {
   rowId: string;
   batchId: string;
@@ -130,6 +146,11 @@ interface BatchReadinessRowDto {
   brand: string;
   readinessState: ReadinessState;
   lifecycleStage: RowLifecycleStage;
+  validation: {
+    blockers: number;
+    warnings: number;
+    primaryCategory: ValidationCategory | null;
+  };
   issueSummaries: ReadinessIssueSummaryDto[];
   imageEvidence: ReadinessImageEvidenceDto[];
   evaluatedAt: string;
@@ -157,7 +178,9 @@ type RowIssueSeverity = "BLOCKER" | "WARNING";
 interface RowIssueDetailDto {
   severity: RowIssueSeverity;
   code: string;
+  category: ValidationCategory;
   reason: string;
+  remediationHint: string;
   nextActionLabel: string;
   nextActionHref?: string;
 }
@@ -184,6 +207,7 @@ interface BatchReadinessRowDetailDto {
   lifecycleStage: RowLifecycleStage;
   issues: RowIssueDetailDto[];
   issueSummaries: ReadinessIssueSummaryDto[];
+  validationResults: ValidationRuleResultDto[];
   imageEvidence: ReadinessImageEvidenceDto[];
   normalizedFields: BatchIntakeReviewDto["rows"][number]["normalizedFields"];
   originalImageIds: string[];
@@ -373,6 +397,37 @@ async function ensureSchema() {
 
     create index if not exists batch_row_validation_evidence_batch_idx
       on batch_row_validation_evidence (organization_id, batch_id, updated_at desc);
+
+    create table if not exists batch_row_validation_results (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      row_revision integer not null,
+      rule_version text not null,
+      results jsonb not null default '[]'::jsonb,
+      evaluated_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_row_validation_results_batch_idx
+      on batch_row_validation_results (organization_id, batch_id, updated_at desc);
+
+    create table if not exists batch_row_corrections (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      base_row_revision integer not null,
+      row_revision integer not null,
+      patch jsonb not null default '{}'::jsonb,
+      created_by text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_row_corrections_batch_idx
+      on batch_row_corrections (organization_id, batch_id, updated_at desc);
   `).then(() => undefined);
 
   return schemaReady;
@@ -503,6 +558,14 @@ async function buildRowsFromSource(batchId: string, organizationId: string, rows
       originalImageIds: imageIds,
       normalizedFields: [
         {
+          field: "sku",
+          label: "SKU",
+          rawValue: sourceValue(sourceRow, "sku"),
+          normalizedValue: sourceValue(sourceRow, "sku") || rowId,
+          confidence: 1,
+          status: "MAPPED",
+        },
+        {
           field: "title",
           label: "Product title",
           rawValue: sourceValue(sourceRow, "name"),
@@ -518,6 +581,66 @@ async function buildRowsFromSource(batchId: string, organizationId: string, rows
           confidence: 1,
           status: "MAPPED",
         },
+        ...(sourceRow.gtin !== undefined
+          ? [
+              {
+                field: "gtin",
+                label: "GTIN",
+                rawValue: sourceValue(sourceRow, "gtin"),
+                normalizedValue: sourceValue(sourceRow, "gtin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.variant_group !== undefined
+          ? [
+              {
+                field: "variant_group",
+                label: "Variant group",
+                rawValue: sourceValue(sourceRow, "variant_group"),
+                normalizedValue: sourceValue(sourceRow, "variant_group"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.variant_key !== undefined
+          ? [
+              {
+                field: "variant_key",
+                label: "Variant key",
+                rawValue: sourceValue(sourceRow, "variant_key"),
+                normalizedValue: sourceValue(sourceRow, "variant_key"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.variant_value !== undefined
+          ? [
+              {
+                field: "variant_value",
+                label: "Variant value",
+                rawValue: sourceValue(sourceRow, "variant_value"),
+                normalizedValue: sourceValue(sourceRow, "variant_value"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.forced_match_asin !== undefined
+          ? [
+              {
+                field: "forced_match_asin",
+                label: "Forced match ASIN",
+                rawValue: sourceValue(sourceRow, "forced_match_asin"),
+                normalizedValue: sourceValue(sourceRow, "forced_match_asin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
       ],
       interpretationStatus: interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW",
       interpretationIssues,
@@ -925,14 +1048,280 @@ async function handleReprocess(req: IncomingMessage, res: ServerResponse, batchI
   });
 }
 
-function evaluateReadinessRow(row: BatchIntakeReviewDto["rows"][number]): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
-  const issueSummaries: ReadinessIssueSummaryDto[] = [
-    ...row.interpretationIssues.map((issue) => ({ code: issue.code, message: issue.message })),
-    ...row.imageIssues.map((issue) => ({ code: issue.code, message: issue.message })),
-  ];
-  const readinessState: ReadinessState = issueSummaries.length > 0 ? "NEEDS_INPUT" : "READY";
-  const lifecycleStage: RowLifecycleStage = readinessState === "READY" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
+const validationRuleVersion = "v1";
+
+function normalizedValueForField(row: BatchIntakeReviewDto["rows"][number], field: string) {
+  const match = row.normalizedFields.find((item) => item.field === field);
+  return {
+    raw: match?.rawValue ?? "",
+    normalized: match?.normalizedValue ?? "",
+  };
+}
+
+type DuplicateContext = {
+  skuCounts: Record<string, number>;
+  gtinCounts: Record<string, number>;
+  titleBrandCounts: Record<string, number>;
+};
+
+function incrementCounter(record: Record<string, number>, key: string) {
+  if (!key) {
+    return;
+  }
+
+  record[key] = (record[key] ?? 0) + 1;
+}
+
+function buildDuplicateContext(rows: BatchIntakeReviewDto["rows"]): DuplicateContext {
+  const context: DuplicateContext = {
+    skuCounts: {},
+    gtinCounts: {},
+    titleBrandCounts: {},
+  };
+
+  for (const row of rows) {
+    incrementCounter(context.skuCounts, row.sku.trim().toLowerCase());
+    const gtin = normalizedValueForField(row, "gtin").normalized.trim().toLowerCase();
+    incrementCounter(context.gtinCounts, gtin);
+    const title = normalizedValueForField(row, "title").normalized.trim().toLowerCase();
+    const brand = normalizedValueForField(row, "brand").normalized.trim().toLowerCase();
+    incrementCounter(context.titleBrandCounts, title && brand ? `${title}::${brand}` : "");
+  }
+
+  return context;
+}
+
+function deriveReadinessState(results: ValidationRuleResultDto[]) {
+  const impacts = results.map((result) => result.readinessImpact);
+
+  if (impacts.includes("BLOCKED_FOR_REVIEW")) {
+    return "BLOCKED_FOR_REVIEW" as const;
+  }
+
+  if (impacts.includes("NEEDS_INPUT")) {
+    return "NEEDS_INPUT" as const;
+  }
+
+  if (impacts.includes("NOT_ENOUGH_DATA")) {
+    return "NOT_ENOUGH_DATA" as const;
+  }
+
+  if (results.some((result) => result.severity === "WARNING")) {
+    return "READY_WITH_AUGMENTATION" as const;
+  }
+
+  return "READY" as const;
+}
+
+function buildValidationSummary(results: ValidationRuleResultDto[]) {
+  const blockers = results.filter((result) => result.severity === "BLOCKER").length;
+  const warnings = results.filter((result) => result.severity === "WARNING").length;
+  const primaryCategory = results.find((result) => result.severity === "BLOCKER")?.category ?? results[0]?.category ?? null;
+
+  return { blockers, warnings, primaryCategory } satisfies BatchReadinessRowDto["validation"];
+}
+
+async function evaluateValidationRules(
+  client: import("pg").PoolClient,
+  row: BatchIntakeReviewDto["rows"][number],
+  organizationId: string,
+  duplicateContext: DuplicateContext,
+): Promise<ValidationRuleResultDto[]> {
+  const results: ValidationRuleResultDto[] = [];
+
+  for (const issue of row.interpretationIssues) {
+    const isImageIssue = issue.code === "UNRESOLVED_IMAGE_REFERENCE";
+    results.push({
+      ruleCode: issue.code,
+      category: isImageIssue ? "IMAGE" : "INTAKE",
+      severity: "BLOCKER",
+      field: issue.field,
+      message: issue.message,
+      remediationHint: issue.correctionHint,
+      blocking: true,
+      readinessImpact: isImageIssue ? "NOT_ENOUGH_DATA" : "NEEDS_INPUT",
+    });
+  }
+
+  for (const issue of row.imageIssues) {
+    results.push({
+      ruleCode: issue.code,
+      category: "IMAGE",
+      severity: "BLOCKER",
+      field: issue.originalImageId,
+      message: issue.message,
+      remediationHint: issue.recoveryHint,
+      blocking: true,
+      readinessImpact: "NOT_ENOUGH_DATA",
+      evidence: { originalImageId: issue.originalImageId },
+    });
+  }
+
+  const title = normalizedValueForField(row, "title");
+  if (!title.raw) {
+    results.push({
+      ruleCode: "REQUIRED_TITLE_MISSING",
+      category: "ATTRIBUTE",
+      severity: "BLOCKER",
+      field: "title",
+      message: "Product title is required",
+      remediationHint: "Provide a product name in the spreadsheet, then reprocess intake.",
+      blocking: true,
+      readinessImpact: "NEEDS_INPUT",
+    });
+  }
+
+  const brand = normalizedValueForField(row, "brand");
+  if (!brand.raw) {
+    results.push({
+      ruleCode: "REQUIRED_BRAND_MISSING",
+      category: "ATTRIBUTE",
+      severity: "BLOCKER",
+      field: "brand",
+      message: "Brand is required",
+      remediationHint: "Provide a brand value in the spreadsheet, then reprocess intake.",
+      blocking: true,
+      readinessImpact: "NEEDS_INPUT",
+    });
+  }
+
+  const gtin = normalizedValueForField(row, "gtin");
+  if (row.normalizedFields.some((field) => field.field === "gtin") && !gtin.normalized) {
+    results.push({
+      ruleCode: "IDENTIFIER_GTIN_REQUIRED",
+      category: "IDENTIFIER",
+      severity: "BLOCKER",
+      field: "gtin",
+      message: "GTIN is required when the spreadsheet provides a GTIN column",
+      remediationHint: "Fill the GTIN value or remove the GTIN column for this batch.",
+      blocking: true,
+      readinessImpact: "BLOCKED_FOR_REVIEW",
+    });
+  }
+
+  if (row.resolvedAssets.length === 0) {
+    results.push({
+      ruleCode: "IMAGE_EVIDENCE_REQUIRED",
+      category: "IMAGE",
+      severity: "BLOCKER",
+      field: "image_id",
+      message: "At least one resolved image is required",
+      remediationHint: "Upload the image through the image service, update the spreadsheet image_id values, then reprocess intake.",
+      blocking: true,
+      readinessImpact: "NOT_ENOUGH_DATA",
+    });
+  }
+
+  const assetIds = row.resolvedAssets.map((asset) => asset.imageId);
+  if (assetIds.length > 0) {
+    const assets = await client.query<{ image_id: string }>(
+      `select image_id from image_assets where organization_id = $1 and image_id = any($2::text[])`,
+      [organizationId, assetIds],
+    );
+    const present = new Set(assets.rows.map((asset) => asset.image_id));
+
+    for (const imageId of assetIds) {
+      if (!present.has(imageId)) {
+        results.push({
+          ruleCode: "IMAGE_ASSET_MISSING",
+          category: "IMAGE",
+          severity: "BLOCKER",
+          field: "image_id",
+          message: "Image asset metadata was not found for the referenced image",
+          remediationHint: "Re-upload the missing image through the image service, then reprocess intake.",
+          blocking: true,
+          readinessImpact: "NOT_ENOUGH_DATA",
+          evidence: { imageId },
+        });
+      }
+    }
+  }
+
+  const variantGroup = normalizedValueForField(row, "variant_group");
+  const variantKey = normalizedValueForField(row, "variant_key");
+  const variantValue = normalizedValueForField(row, "variant_value");
+  if (variantGroup.raw || variantKey.raw || variantValue.raw) {
+    if (!variantGroup.normalized || !variantKey.normalized || !variantValue.normalized) {
+      results.push({
+        ruleCode: "VARIANT_STRUCTURE_INCOMPLETE",
+        category: "VARIANT",
+        severity: "WARNING",
+        field: "variant_group",
+        message: "Variant structure is incomplete",
+        remediationHint: "Provide variant group, key, and value to enable later variant prep or clear variant columns.",
+        blocking: false,
+        readinessImpact: "READY_WITH_AUGMENTATION",
+        evidence: { variantGroup: variantGroup.normalized, variantKey: variantKey.normalized, variantValue: variantValue.normalized },
+      });
+    }
+  }
+
+  const forcedMatch = normalizedValueForField(row, "forced_match_asin").normalized.trim();
+  if (forcedMatch) {
+    results.push({
+      ruleCode: "FORCED_MATCH_BLOCKED",
+      category: "POLICY",
+      severity: "BLOCKER",
+      field: "forced_match_asin",
+      message: "Forced-match protection blocked this row from the new-product-only workflow",
+      remediationHint: "Remove the forced_match_asin value or move this row to an existing-ASIN workflow outside the default path.",
+      blocking: true,
+      readinessImpact: "BLOCKED_FOR_REVIEW",
+      evidence: { signalSource: "EXPLICIT_ROW_FIELD", forcedMatchAsin: forcedMatch, decisionOutcome: "BLOCK_DEFAULT_WORKFLOW" },
+    });
+  }
+
+  const normalizedSku = row.sku.trim().toLowerCase();
+  const gtinValue = normalizedValueForField(row, "gtin").normalized.trim().toLowerCase();
+  const titleBrandKey = (() => {
+    const titleValue = normalizedValueForField(row, "title").normalized.trim().toLowerCase();
+    const brandValue = normalizedValueForField(row, "brand").normalized.trim().toLowerCase();
+    return titleValue && brandValue ? `${titleValue}::${brandValue}` : "";
+  })();
+
+  const duplicateSignals: Array<{ type: string; value: string; count: number }> = [];
+  const skuCount = duplicateContext.skuCounts[normalizedSku] ?? 0;
+  if (normalizedSku && skuCount > 1) {
+    duplicateSignals.push({ type: "SKU", value: normalizedSku, count: skuCount });
+  }
+
+  const gtinCount = duplicateContext.gtinCounts[gtinValue] ?? 0;
+  if (gtinValue && gtinCount > 1) {
+    duplicateSignals.push({ type: "GTIN", value: gtinValue, count: gtinCount });
+  }
+
+  const titleBrandCount = duplicateContext.titleBrandCounts[titleBrandKey] ?? 0;
+  if (titleBrandKey && titleBrandCount > 1) {
+    duplicateSignals.push({ type: "TITLE_BRAND", value: titleBrandKey, count: titleBrandCount });
+  }
+
+  if (duplicateSignals.length > 0) {
+    results.push({
+      ruleCode: "DUPLICATE_RISK_WARNING",
+      category: "DUPLICATE",
+      severity: "WARNING",
+      field: duplicateSignals[0].type.toLowerCase(),
+      message: "Potential duplicate risk detected within this batch",
+      remediationHint: "Inspect the highlighted rows to confirm this is a new product before proceeding.",
+      blocking: false,
+      readinessImpact: "READY_WITH_AUGMENTATION",
+      evidence: { signalSource: "LOCAL_BATCH_SCAN", matches: duplicateSignals, decisionOutcome: "WARN_ONLY" },
+    });
+  }
+
+  return results;
+}
+
+function evaluateReadinessRow(
+  row: BatchIntakeReviewDto["rows"][number],
+  validationResults: ValidationRuleResultDto[],
+): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
+  const validation = buildValidationSummary(validationResults);
+  const readinessState = deriveReadinessState(validationResults);
+  const lifecycleStage: RowLifecycleStage =
+    readinessState === "READY" || readinessState === "READY_WITH_AUGMENTATION" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
   const imageEvidence = row.resolvedAssets.map((asset) => ({ imageId: asset.imageId, previewRef: asset.previewRef }));
+  const issueSummaries: ReadinessIssueSummaryDto[] = validationResults.map((result) => ({ code: result.ruleCode, message: result.message }));
 
   return {
     rowId: row.rowId,
@@ -945,6 +1334,7 @@ function evaluateReadinessRow(row: BatchIntakeReviewDto["rows"][number]): Omit<B
     brand: row.brand,
     readinessState,
     lifecycleStage,
+    validation,
     issueSummaries,
     imageEvidence,
   };
@@ -1101,6 +1491,49 @@ async function upsertValidationEvidence(
   );
 }
 
+async function upsertValidationResults(
+  client: import("pg").PoolClient,
+  organizationId: string,
+  batchId: string,
+  rowId: string,
+  rowRevision: number,
+  results: ValidationRuleResultDto[],
+) {
+  const payload = JSON.stringify(results);
+  const inserted = await client.query<{ evaluated_at: string; updated_at: string }>(
+    `insert into batch_row_validation_results (
+        organization_id,
+        batch_id,
+        row_id,
+        row_revision,
+        rule_version,
+        results
+      )
+      values ($1, $2, $3, $4, $5, $6::jsonb)
+      on conflict (organization_id, batch_id, row_id, row_revision) do update set
+        rule_version = excluded.rule_version,
+        results = excluded.results,
+        updated_at = now()
+      where batch_row_validation_results.rule_version is distinct from excluded.rule_version
+        or batch_row_validation_results.results is distinct from excluded.results
+      returning evaluated_at::text, updated_at::text`,
+    [organizationId, batchId, rowId, rowRevision, validationRuleVersion, payload],
+  );
+
+  if (inserted.rows[0]) {
+    return inserted.rows[0];
+  }
+
+  const existing = await client.query<{ evaluated_at: string; updated_at: string }>(
+    `select evaluated_at::text, updated_at::text
+       from batch_row_validation_results
+      where organization_id = $1 and batch_id = $2 and row_id = $3 and row_revision = $4`,
+    [organizationId, batchId, rowId, rowRevision],
+  );
+
+  return existing.rows[0] ?? { evaluated_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+}
+
 async function handleEvaluateReadiness(req: IncomingMessage, res: ServerResponse, batchId: string) {
   const input = await parseJson(req);
   const organizationId = String(input.organizationId ?? "");
@@ -1124,12 +1557,15 @@ async function handleEvaluateReadiness(req: IncomingMessage, res: ServerResponse
   try {
     await client.query("begin");
     const rows: BatchReadinessRowDto[] = [];
+    const duplicateContext = buildDuplicateContext(review.rows);
 
     for (const row of review.rows) {
-      const base = evaluateReadinessRow(row);
+      const validationResults = await evaluateValidationRules(client, row, organizationId, duplicateContext);
+      const base = evaluateReadinessRow(row, validationResults);
       const persisted = await upsertReadinessRow(client, organizationId, batchId, base);
       await upsertLifecycleEvent(client, organizationId, batchId, base);
       await upsertValidationEvidence(client, organizationId, batchId, base);
+      await upsertValidationResults(client, organizationId, batchId, base.rowId, base.rowRevision, validationResults);
       rows.push(persisted);
     }
 
@@ -1167,25 +1603,36 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
     lifecycle_stage: RowLifecycleStage;
     issue_summaries: ReadinessIssueSummaryDto[];
     evidence: ReadinessImageEvidenceDto[];
+    validation_results: ValidationRuleResultDto[];
     evaluated_at: string;
     updated_at: string;
   }>(
-    `select
-        row_id,
-        source_row_number,
-        source_row_key,
-        row_revision,
-        sku,
-        product_name,
-        brand,
-        readiness_state,
-        lifecycle_stage,
-        issue_summaries,
-        evidence,
-        evaluated_at::text,
-        updated_at::text
-      from batch_readiness_results
-      where organization_id = $1 and batch_id = $2
+    `select *
+       from (
+         select distinct on (batch_readiness_results.row_id)
+           row_id,
+           source_row_number,
+           source_row_key,
+           row_revision,
+           sku,
+           product_name,
+           brand,
+           readiness_state,
+           lifecycle_stage,
+           issue_summaries,
+           evidence,
+           coalesce(batch_row_validation_results.results, '[]'::jsonb) as validation_results,
+           evaluated_at::text,
+           batch_readiness_results.updated_at::text as updated_at
+         from batch_readiness_results
+         left join batch_row_validation_results
+           on batch_row_validation_results.organization_id = batch_readiness_results.organization_id
+           and batch_row_validation_results.batch_id = batch_readiness_results.batch_id
+           and batch_row_validation_results.row_id = batch_readiness_results.row_id
+           and batch_row_validation_results.row_revision = batch_readiness_results.row_revision
+         where batch_readiness_results.organization_id = $1 and batch_readiness_results.batch_id = $2
+         order by batch_readiness_results.row_id, batch_readiness_results.row_revision desc
+       ) latest
       order by source_row_number asc`,
     [organizationId, batchId],
   );
@@ -1205,6 +1652,7 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
     brand: row.brand ?? "",
     readinessState: row.readiness_state,
     lifecycleStage: row.lifecycle_stage,
+    validation: buildValidationSummary(Array.isArray(row.validation_results) ? row.validation_results : []),
     issueSummaries: Array.isArray(row.issue_summaries) ? row.issue_summaries : [],
     imageEvidence: Array.isArray(row.evidence) ? row.evidence : [],
     evaluatedAt: row.evaluated_at,
@@ -1218,18 +1666,20 @@ async function handleGetReadiness(req: IncomingMessage, res: ServerResponse, bat
   sendJson(res, 200, { batchId, organizationId, rows, summary, evaluatedAt, updatedAt } satisfies BatchReadinessEvaluationDto);
 }
 
-function buildRowIssues(
-  row: Pick<BatchReadinessRowDetailDto, "issueSummaries" | "readinessState" | "batchId" | "rowId">,
-): RowIssueDetailDto[] {
-  return row.issueSummaries.map((issue) => {
-    const needsCorrection = row.readinessState !== "READY" && row.readinessState !== "READY_WITH_AUGMENTATION";
-    const nextActionLabel = needsCorrection ? "Review correction path" : "Review readiness state";
-    const nextActionHref = needsCorrection ? `/batches/${encodeURIComponent(row.batchId)}/mapping?correction=${encodeURIComponent(row.rowId)}` : undefined;
+function buildRowIssues(row: Pick<BatchReadinessRowDetailDto, "validationResults" | "batchId" | "rowId">): RowIssueDetailDto[] {
+  return row.validationResults.map((result) => {
+    const nextActionLabel = result.category === "IMAGE" ? "Open image plan" : "Review mapping";
+    const nextActionHref =
+      result.category === "IMAGE"
+        ? `/batches/${encodeURIComponent(row.batchId)}/images`
+        : `/batches/${encodeURIComponent(row.batchId)}/mapping?correction=${encodeURIComponent(row.rowId)}`;
 
     return {
-      severity: needsCorrection ? "BLOCKER" : "WARNING",
-      code: issue.code,
-      reason: issue.message,
+      severity: result.severity,
+      code: result.ruleCode,
+      category: result.category,
+      reason: result.message,
+      remediationHint: result.remediationHint,
       nextActionLabel,
       nextActionHref,
     };
@@ -1252,6 +1702,241 @@ function lifecycleSummary(stage: RowLifecycleStage, readiness: ReadinessState) {
   return "Row is intake-ready.";
 }
 
+type RowCorrectionPatchDto = {
+  title?: string;
+  brand?: string;
+  gtin?: string;
+  forcedMatchAsin?: string;
+  imageIds?: string[];
+};
+
+function upsertNormalizedField(
+  normalizedFields: BatchIntakeReviewDto["rows"][number]["normalizedFields"],
+  field: string,
+  label: string,
+  value: string,
+) {
+  const trimmed = value ?? "";
+  const existingIndex = normalizedFields.findIndex((item) => item.field === field);
+  const next = {
+    field,
+    label,
+    rawValue: trimmed,
+    normalizedValue: trimmed,
+    confidence: 1,
+    status: "MAPPED" as const,
+  };
+
+  if (existingIndex === -1) {
+    return [...normalizedFields, next];
+  }
+
+  const updated = [...normalizedFields];
+  updated[existingIndex] = { ...updated[existingIndex], ...next };
+  return updated;
+}
+
+async function applyRowPatch(
+  baseRow: BatchIntakeReviewDto["rows"][number],
+  organizationId: string,
+  patch: RowCorrectionPatchDto,
+  nextRowRevision: number,
+): Promise<BatchIntakeReviewDto["rows"][number]> {
+  let normalizedFields = baseRow.normalizedFields;
+  let productName = baseRow.productName;
+  let brand = baseRow.brand;
+  let originalImageIds = baseRow.originalImageIds;
+  let resolvedAssets = baseRow.resolvedAssets;
+  let imageIssues = baseRow.imageIssues;
+  let interpretationIssues = baseRow.interpretationIssues;
+  let interpretationStatus = baseRow.interpretationStatus;
+
+  if (patch.title !== undefined) {
+    productName = patch.title || "Untitled product";
+    normalizedFields = upsertNormalizedField(normalizedFields, "title", "Product title", patch.title);
+  }
+
+  if (patch.brand !== undefined) {
+    brand = patch.brand || "Unknown brand";
+    normalizedFields = upsertNormalizedField(normalizedFields, "brand", "Brand", patch.brand);
+  }
+
+  if (patch.gtin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "gtin", "GTIN", patch.gtin);
+  }
+
+  if (patch.forcedMatchAsin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "forced_match_asin", "Forced match ASIN", patch.forcedMatchAsin);
+  }
+
+  if (patch.imageIds !== undefined) {
+    originalImageIds = patch.imageIds.filter(Boolean);
+    const images = await resolveImageReferences(originalImageIds, organizationId);
+    resolvedAssets = images.resolvedAssets;
+    imageIssues = images.imageIssues;
+    interpretationIssues = imageIssues.map((issue) => ({
+      code: "UNRESOLVED_IMAGE_REFERENCE" as const,
+      label: "Unresolved image reference",
+      field: "image references",
+      message: issue.message,
+      correctionHint: issue.recoveryHint,
+    }));
+    interpretationStatus = interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW";
+  }
+
+  return {
+    ...baseRow,
+    rowRevision: nextRowRevision,
+    intakeAttempt: baseRow.intakeAttempt + 1,
+    productName,
+    brand,
+    originalImageIds,
+    normalizedFields,
+    interpretationStatus,
+    interpretationIssues,
+    resolvedAssets,
+    imageIssues,
+  };
+}
+
+async function loadEffectiveRowSnapshot(
+  client: import("pg").PoolClient,
+  review: BatchIntakeReviewDto,
+  batchId: string,
+  organizationId: string,
+  rowId: string,
+  targetRowRevision: number,
+): Promise<BatchIntakeReviewDto["rows"][number] | null> {
+  const correction = await client.query<{ base_row_revision: number; patch: RowCorrectionPatchDto }>(
+    `select base_row_revision, patch
+       from batch_row_corrections
+      where organization_id = $1 and batch_id = $2 and row_id = $3 and row_revision = $4`,
+    [organizationId, batchId, rowId, targetRowRevision],
+  );
+
+  const baseRowRevision = correction.rows[0]?.base_row_revision ?? null;
+  const patch = correction.rows[0]?.patch ?? null;
+
+  if (baseRowRevision !== null && patch) {
+    const baseSnapshot = await loadEffectiveRowSnapshot(client, review, batchId, organizationId, rowId, baseRowRevision);
+    if (!baseSnapshot) {
+      return null;
+    }
+    return applyRowPatch(baseSnapshot, organizationId, patch, targetRowRevision);
+  }
+
+  return (
+    review.rows.find((row) => row.rowId === rowId && row.rowRevision === targetRowRevision) ??
+    review.rows.find((row) => row.rowId === rowId) ??
+    null
+  );
+}
+
+async function handleCorrectRow(req: IncomingMessage, res: ServerResponse, batchId: string, rowId: string) {
+  const input = await parseJson(req);
+  const organizationId = String(input.organizationId ?? "");
+  const baseRowRevision = Number(input.baseRowRevision ?? 0);
+  const createdBy = input.createdBy !== undefined ? String(input.createdBy) : null;
+  const patch = (input.patch ?? {}) as RowCorrectionPatchDto;
+
+  if (!organizationId) {
+    return sendError(res, 400, "MISSING_ORGANIZATION", "Select an active workspace before correcting rows.");
+  }
+
+  const client = await getPool().connect();
+
+  try {
+    await client.query("begin");
+
+    const currentRevisionResult = await client.query<{ row_revision: number }>(
+      `select row_revision
+         from batch_readiness_results
+        where organization_id = $1 and batch_id = $2 and row_id = $3
+        order by row_revision desc
+        limit 1`,
+      [organizationId, batchId, rowId],
+    );
+
+    const currentRevision = currentRevisionResult.rows[0]?.row_revision;
+
+    if (!currentRevision) {
+      await client.query("rollback");
+      return sendError(res, 404, "INTAKE_FAILED", "Row detail was not found. Run readiness evaluation before correcting rows.");
+    }
+
+    if (baseRowRevision && baseRowRevision !== currentRevision) {
+      await client.query("rollback");
+      return sendError(
+        res,
+        409,
+        "INTAKE_FAILED",
+        "Row revision is stale. Refresh the row inspector before applying corrections.",
+      );
+    }
+
+    const review = await readReview(batchId, organizationId);
+
+    if (!review) {
+      await client.query("rollback");
+      return sendError(res, 404, "INTAKE_FAILED", "Batch intake data was not found. Create the batch before correcting rows.");
+    }
+
+    const baseSnapshot = await loadEffectiveRowSnapshot(client, review, batchId, organizationId, rowId, currentRevision);
+
+    if (!baseSnapshot) {
+      await client.query("rollback");
+      return sendError(res, 404, "INTAKE_FAILED", "Row data was not found for this revision.");
+    }
+
+    const nextRevision = currentRevision + 1;
+    const nextSnapshot = await applyRowPatch(baseSnapshot, organizationId, patch, nextRevision);
+    const duplicateContext = buildDuplicateContext(
+      review.rows.map((row) => (row.rowId === rowId ? nextSnapshot : row)),
+    );
+    const validationResults = await evaluateValidationRules(client, nextSnapshot, organizationId, duplicateContext);
+    const base = evaluateReadinessRow(nextSnapshot, validationResults);
+
+    await client.query(
+      `insert into batch_row_corrections (
+          organization_id,
+          batch_id,
+          row_id,
+          base_row_revision,
+          row_revision,
+          patch,
+          created_by
+        )
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        on conflict (organization_id, batch_id, row_id, row_revision) do update set
+          patch = excluded.patch,
+          created_by = excluded.created_by,
+          updated_at = now()`,
+      [organizationId, batchId, rowId, currentRevision, nextRevision, JSON.stringify(patch), createdBy],
+    );
+
+    const persisted = await upsertReadinessRow(client, organizationId, batchId, base);
+    await upsertLifecycleEvent(client, organizationId, batchId, base);
+    await upsertValidationEvidence(client, organizationId, batchId, base);
+    await upsertValidationResults(client, organizationId, batchId, base.rowId, base.rowRevision, validationResults);
+
+    await client.query("commit");
+
+    sendJson(res, 200, {
+      rowId: persisted.rowId,
+      batchId: persisted.batchId,
+      organizationId,
+      rowRevision: persisted.rowRevision,
+      readinessState: persisted.readinessState,
+      lifecycleStage: persisted.lifecycleStage,
+    });
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, batchId: string, rowId: string) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const organizationId = url.searchParams.get("organizationId") ?? "";
@@ -1272,6 +1957,7 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
     lifecycle_stage: RowLifecycleStage;
     issue_summaries: ReadinessIssueSummaryDto[];
     evidence: ReadinessImageEvidenceDto[];
+    validation_results: ValidationRuleResultDto[];
     evaluated_at: string;
     updated_at: string;
   }>(
@@ -1287,9 +1973,15 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
         lifecycle_stage,
         issue_summaries,
         evidence,
+        coalesce(batch_row_validation_results.results, '[]'::jsonb) as validation_results,
         evaluated_at::text,
         updated_at::text
       from batch_readiness_results
+      left join batch_row_validation_results
+        on batch_row_validation_results.organization_id = batch_readiness_results.organization_id
+        and batch_row_validation_results.batch_id = batch_readiness_results.batch_id
+        and batch_row_validation_results.row_id = batch_readiness_results.row_id
+        and batch_row_validation_results.row_revision = batch_readiness_results.row_revision
       where organization_id = $1 and batch_id = $2 and row_id = $3
       order by row_revision desc
       limit 1`,
@@ -1304,10 +1996,14 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
 
   const review = await readReview(batchId, organizationId);
 
-  const intakeRow =
-    review?.rows.find((row) => row.rowId === rowId && row.rowRevision === readiness.row_revision) ??
-    review?.rows.find((row) => row.rowId === rowId) ??
-    null;
+  const snapshotClient = await getPool().connect();
+  let intakeRow: BatchIntakeReviewDto["rows"][number] | null = null;
+
+  try {
+    intakeRow = review ? await loadEffectiveRowSnapshot(snapshotClient, review, batchId, organizationId, rowId, readiness.row_revision) : null;
+  } finally {
+    snapshotClient.release();
+  }
 
   const historyResult = await getPool().query<{
     lifecycle_stage: RowLifecycleStage;
@@ -1329,6 +2025,8 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
     summary: lifecycleSummary(entry.lifecycle_stage, entry.readiness_state),
   }));
 
+  const validationResults = Array.isArray(readiness.validation_results) ? readiness.validation_results : [];
+
   const detail: BatchReadinessRowDetailDto = {
     rowId,
     batchId,
@@ -1344,11 +2042,11 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
     lifecycleStage: readiness.lifecycle_stage,
     issueSummaries: Array.isArray(readiness.issue_summaries) ? readiness.issue_summaries : [],
     issues: buildRowIssues({
-      issueSummaries: Array.isArray(readiness.issue_summaries) ? readiness.issue_summaries : [],
-      readinessState: readiness.readiness_state,
+      validationResults,
       batchId,
       rowId,
     }),
+    validationResults,
     imageEvidence: Array.isArray(readiness.evidence) ? readiness.evidence : [],
     normalizedFields: intakeRow?.normalizedFields ?? [],
     originalImageIds: intakeRow?.originalImageIds ?? [],
@@ -1400,6 +2098,12 @@ async function routeApi(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === "POST" && readinessEvaluateMatch) {
     return handleEvaluateReadiness(req, res, readinessEvaluateMatch[1]);
+  }
+
+  const correctionMatch = pathname.match(/^\/api\/batches\/([^/]+)\/rows\/([^/]+)\/corrections$/);
+
+  if (req.method === "POST" && correctionMatch) {
+    return handleCorrectRow(req, res, correctionMatch[1], decodeURIComponent(correctionMatch[2]));
   }
 
   const readinessRowMatch = pathname.match(/^\/api\/batches\/([^/]+)\/rows\/([^/]+)$/);
