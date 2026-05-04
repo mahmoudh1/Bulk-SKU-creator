@@ -469,6 +469,14 @@ function buildRowsFromSource(batchId: string, organizationId: string, rows: Sour
       originalImageIds: imageIds,
       normalizedFields: [
         {
+          field: "sku",
+          label: "SKU",
+          rawValue: sourceValue(sourceRow, "sku"),
+          normalizedValue: sourceValue(sourceRow, "sku") || rowId,
+          confidence: 1,
+          status: "MAPPED",
+        },
+        {
           field: "title",
           label: "Product title",
           rawValue: sourceValue(sourceRow, "name"),
@@ -484,6 +492,30 @@ function buildRowsFromSource(batchId: string, organizationId: string, rows: Sour
           confidence: 1,
           status: "MAPPED",
         },
+        ...(sourceRow.gtin !== undefined
+          ? [
+              {
+                field: "gtin",
+                label: "GTIN",
+                rawValue: sourceValue(sourceRow, "gtin"),
+                normalizedValue: sourceValue(sourceRow, "gtin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
+        ...(sourceRow.forced_match_asin !== undefined
+          ? [
+              {
+                field: "forced_match_asin",
+                label: "Forced match ASIN",
+                rawValue: sourceValue(sourceRow, "forced_match_asin"),
+                normalizedValue: sourceValue(sourceRow, "forced_match_asin"),
+                confidence: 1,
+                status: "MAPPED" as const,
+              },
+            ]
+          : []),
       ],
       interpretationStatus: interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW",
       interpretationIssues,
@@ -903,4 +935,751 @@ export async function listBatches(organizationId: string): Promise<BatchListItem
   }
 
   return (await response.json()) as BatchListItemDto[];
+}
+
+export type ReadinessState = "READY" | "READY_WITH_AUGMENTATION" | "NEEDS_INPUT" | "NOT_ENOUGH_DATA" | "BLOCKED_FOR_REVIEW";
+export type RowLifecycleStage = "INTAKE_READY" | "READINESS_EVALUATED" | "NEEDS_CORRECTION" | "READY_FOR_SUBMISSION_PREP";
+
+export interface ReadinessIssueSummaryDto {
+  code: string;
+  message: string;
+}
+
+export interface ReadinessImageEvidenceDto {
+  imageId: string;
+  previewRef: string;
+}
+
+export interface ProductTypeCandidateDto {
+  productType: string;
+  confidence: number;
+}
+
+export interface ProductTypeDecisionDto {
+  candidates: ProductTypeCandidateDto[];
+  threshold: number;
+  selectedValue: string;
+  confirmedValue: string | null;
+  confirmationRequired: boolean;
+  reason: string;
+  decidedBy: string | null;
+}
+
+export interface BatchReadinessRowDto {
+  rowId: string;
+  batchId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issueSummaries: ReadinessIssueSummaryDto[];
+  imageEvidence: ReadinessImageEvidenceDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+export interface BatchReadinessEvaluationDto {
+  batchId: string;
+  organizationId: string;
+  rows: BatchReadinessRowDto[];
+  summary: {
+    totalRows: number;
+    ready: number;
+    readyAugmented: number;
+    needsInput: number;
+    blocked: number;
+    notEnoughData: number;
+  };
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluateBatchReadinessInput {
+  batchId: string;
+  organizationId: string;
+}
+
+export type RowIssueSeverity = "BLOCKER" | "WARNING";
+
+export interface RowIssueDetailDto {
+  severity: RowIssueSeverity;
+  code: string;
+  reason: string;
+  nextActionLabel: string;
+  nextActionHref?: string;
+}
+
+export interface RowLifecycleEntryDto {
+  timestamp: string;
+  lifecycleStage: RowLifecycleStage;
+  readinessState: ReadinessState;
+  summary: string;
+}
+
+export interface BatchReadinessRowDetailDto {
+  rowId: string;
+  batchId: string;
+  organizationId: string;
+  sourceRowNumber: number;
+  sourceRowKey: string;
+  intakeAttempt: number;
+  rowRevision: number;
+  sku: string;
+  productName: string;
+  brand: string;
+  readinessState: ReadinessState;
+  lifecycleStage: RowLifecycleStage;
+  issues: RowIssueDetailDto[];
+  issueSummaries: ReadinessIssueSummaryDto[];
+  productTypeDecision: ProductTypeDecisionDto | null;
+  imageEvidence: ReadinessImageEvidenceDto[];
+  normalizedFields: NormalizedFieldDto[];
+  originalImageIds: string[];
+  lifecycleHistory: RowLifecycleEntryDto[];
+  evaluatedAt: string;
+  updatedAt: string;
+}
+
+const batchReadinessStorageKey = "bulk-sku-creator:batch-readiness-evaluations:v1";
+const batchReviewContextStorageKey = "bulk-sku-creator:batch-review-contexts:v1";
+
+function readStoredReadiness(): Record<string, BatchReadinessEvaluationDto> {
+  if (!canUseBrowserStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(batchReadinessStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, BatchReadinessEvaluationDto>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export interface BatchReviewContextDto {
+  batchId: string;
+  organizationId: string;
+  userId: string;
+  context: Record<string, string>;
+  updatedAt: string;
+}
+
+function readStoredReviewContexts(): Record<string, BatchReviewContextDto> {
+  if (!canUseBrowserStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(batchReviewContextStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, BatchReviewContextDto>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredReviewContext(entry: BatchReviewContextDto) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    batchReviewContextStorageKey,
+    JSON.stringify({
+      ...readStoredReviewContexts(),
+      [`${entry.organizationId}:${entry.userId}:${entry.batchId}`]: entry,
+    }),
+  );
+}
+
+function loadStoredReviewContext(batchId: string, organizationId: string, userId: string) {
+  return readStoredReviewContexts()[`${organizationId}:${userId}:${batchId}`] ?? null;
+}
+
+function writeStoredReadiness(evaluation: BatchReadinessEvaluationDto) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    batchReadinessStorageKey,
+    JSON.stringify({
+      ...readStoredReadiness(),
+      [evaluation.batchId]: evaluation,
+    }),
+  );
+}
+
+function loadStoredReadiness(batchId: string, organizationId: string) {
+  const evaluation = readStoredReadiness()[batchId];
+
+  if (!evaluation || evaluation.organizationId !== organizationId) {
+    return null;
+  }
+
+  return evaluation;
+}
+
+function readinessStableHash(
+  row: Pick<
+    BatchReadinessRowDto,
+    "readinessState" | "lifecycleStage" | "issueSummaries" | "imageEvidence" | "rowRevision" | "sku" | "productName" | "brand"
+  >,
+) {
+  return JSON.stringify({
+    readinessState: row.readinessState,
+    lifecycleStage: row.lifecycleStage,
+    issueSummaries: row.issueSummaries,
+    imageEvidence: row.imageEvidence,
+    rowRevision: row.rowRevision,
+    sku: row.sku,
+    productName: row.productName,
+    brand: row.brand,
+  });
+}
+
+function normalizedValueForField(row: BatchIntakeRowDto, field: string) {
+  const match = row.normalizedFields.find((item) => item.field === field);
+  return {
+    raw: match?.rawValue ?? "",
+    normalized: match?.normalizedValue ?? "",
+  };
+}
+
+function computeProductTypeDecisionLocal(row: BatchIntakeRowDto, decidedBy: string | null): ProductTypeDecisionDto {
+  const threshold = 0.8;
+  const manual = normalizedValueForField(row, "product_type").normalized.trim();
+
+  if (manual) {
+    return {
+      candidates: [{ productType: manual, confidence: 1 }],
+      threshold,
+      selectedValue: manual,
+      confirmedValue: manual,
+      confirmationRequired: false,
+      reason: "MANUAL_CONFIRMATION",
+      decidedBy,
+    };
+  }
+
+  const title = normalizedValueForField(row, "title").normalized.trim().toLowerCase();
+  let candidates: ProductTypeCandidateDto[] = [];
+
+  if (title.includes("lamp")) {
+    candidates = [
+      { productType: "LIGHTING", confidence: 0.92 },
+      { productType: "HOME_DECOR", confidence: 0.72 },
+    ];
+  } else if (title.includes("chair")) {
+    candidates = [
+      { productType: "FURNITURE", confidence: 0.93 },
+      { productType: "HOME_DECOR", confidence: 0.61 },
+    ];
+  } else if (title.includes("mug")) {
+    candidates = [
+      { productType: "KITCHEN", confidence: 0.91 },
+      { productType: "HOME_GOODS", confidence: 0.63 },
+    ];
+  } else {
+    candidates = [
+      { productType: "GENERAL_MERCHANDISE", confidence: 0.62 },
+      { productType: "HOME_GOODS", confidence: 0.59 },
+    ];
+  }
+
+  const [top, second] = candidates;
+  const gap = Math.abs((top?.confidence ?? 0) - (second?.confidence ?? 0));
+  const below = (top?.confidence ?? 0) < threshold;
+  const ambiguous = gap < 0.15;
+  const confirmationRequired = below || ambiguous;
+  const reason = below ? "BELOW_THRESHOLD" : ambiguous ? "AMBIGUOUS" : "CONFIDENT";
+
+  return {
+    candidates,
+    threshold,
+    selectedValue: top?.productType ?? "",
+    confirmedValue: null,
+    confirmationRequired,
+    reason,
+    decidedBy: null,
+  };
+}
+
+function evaluateReadinessRow(row: BatchIntakeRowDto): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
+  const productTypeDecision = computeProductTypeDecisionLocal(row, null);
+  const issueSummaries: ReadinessIssueSummaryDto[] = [
+    ...row.interpretationIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+    ...row.imageIssues.map((issue) => ({ code: issue.code, message: issue.message })),
+  ];
+
+  if (productTypeDecision.confirmationRequired) {
+    issueSummaries.push({
+      code: "PRODUCT_TYPE_CONFIRMATION_REQUIRED",
+      message: "Product type requires manual confirmation",
+    });
+  }
+  const readinessState: ReadinessState = issueSummaries.length > 0 ? "NEEDS_INPUT" : "READY";
+  const lifecycleStage: RowLifecycleStage = readinessState === "READY" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
+  const imageEvidence = row.resolvedAssets.map((asset) => ({ imageId: asset.imageId, previewRef: asset.previewRef }));
+
+  return {
+    rowId: row.rowId,
+    batchId: row.batchId,
+    sourceRowNumber: row.sourceRowNumber,
+    sourceRowKey: row.sourceRowKey,
+    rowRevision: row.rowRevision,
+    sku: row.sku,
+    productName: row.productName,
+    brand: row.brand,
+    readinessState,
+    lifecycleStage,
+    issueSummaries,
+    imageEvidence,
+  };
+}
+
+function buildReadinessSummary(rows: BatchReadinessRowDto[]): BatchReadinessEvaluationDto["summary"] {
+  const ready = rows.filter((row) => row.readinessState === "READY").length;
+  const readyAugmented = rows.filter((row) => row.readinessState === "READY_WITH_AUGMENTATION").length;
+  const needsInput = rows.filter((row) => row.readinessState === "NEEDS_INPUT").length;
+  const blocked = rows.filter((row) => row.readinessState === "BLOCKED_FOR_REVIEW").length;
+  const notEnoughData = rows.filter((row) => row.readinessState === "NOT_ENOUGH_DATA").length;
+
+  return {
+    totalRows: rows.length,
+    ready,
+    readyAugmented,
+    needsInput,
+    blocked,
+    notEnoughData,
+  };
+}
+
+export async function evaluateBatchReadiness({ batchId, organizationId }: EvaluateBatchReadinessInput): Promise<BatchReadinessEvaluationDto> {
+  if (!batchId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Batch readiness evaluation requires a batch and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/readiness/evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organizationId }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessEvaluationDto;
+  }
+
+  const review = loadStoredReview(batchId, organizationId);
+
+  if (!review) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch intake data was not found. Create the batch from a spreadsheet before running readiness evaluation.",
+    } satisfies BatchApiError;
+  }
+
+  const previous = loadStoredReadiness(batchId, organizationId);
+  const now = new Date("2026-05-03T18:45:00.000Z").toISOString();
+  const rows = review.rows.map((row) => {
+    const base = evaluateReadinessRow(row);
+    const existing = previous?.rows.find((item) => item.rowId === base.rowId && item.rowRevision === base.rowRevision);
+
+    if (existing && readinessStableHash(existing) === readinessStableHash(base)) {
+      return existing;
+    }
+
+    const updatedAt = existing?.updatedAt ?? now;
+    const evaluatedAt = existing?.evaluatedAt ?? now;
+
+    return { ...base, evaluatedAt, updatedAt: existing ? now : updatedAt };
+  });
+
+  const updatedAt = previous && rows.every((row) => previous.rows.some((prevRow) => prevRow.rowId === row.rowId && prevRow.rowRevision === row.rowRevision && readinessStableHash(prevRow) === readinessStableHash(row)))
+    ? previous.updatedAt
+    : now;
+  const evaluatedAt = previous?.evaluatedAt ?? now;
+
+  const evaluation: BatchReadinessEvaluationDto = {
+    batchId,
+    organizationId,
+    rows,
+    summary: buildReadinessSummary(rows),
+    evaluatedAt,
+    updatedAt,
+  };
+
+  writeStoredReadiness(evaluation);
+  return evaluation;
+}
+
+export async function getBatchReadiness({ batchId, organizationId }: EvaluateBatchReadinessInput): Promise<BatchReadinessEvaluationDto> {
+  if (!batchId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Batch readiness evaluation requires a batch and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/readiness?organizationId=${encodeURIComponent(organizationId)}`);
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessEvaluationDto;
+  }
+
+  const readiness = loadStoredReadiness(batchId, organizationId);
+
+  if (!readiness) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch readiness data was not found. Run readiness evaluation before opening the triage workspace.",
+    } satisfies BatchApiError;
+  }
+
+  return readiness;
+}
+
+export async function getBatchReviewContext(input: { batchId: string; organizationId: string; userId: string }): Promise<BatchReviewContextDto | null> {
+  if (!input.batchId || !input.organizationId || !input.userId) {
+    throw { code: "INTAKE_FAILED", message: "Batch review context requires a batch, workspace, and user." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(
+      `/api/batches/${encodeURIComponent(input.batchId)}/review-context?organizationId=${encodeURIComponent(input.organizationId)}&userId=${encodeURIComponent(input.userId)}`,
+    );
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    const payload = (await response.json()) as { context: Record<string, string>; updatedAt: string } | null;
+
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      batchId: input.batchId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      context: payload.context ?? {},
+      updatedAt: payload.updatedAt,
+    };
+  }
+
+  return loadStoredReviewContext(input.batchId, input.organizationId, input.userId);
+}
+
+export async function saveBatchReviewContext(input: { batchId: string; organizationId: string; userId: string; context: Record<string, string> }) {
+  if (!input.batchId || !input.organizationId || !input.userId) {
+    throw { code: "INTAKE_FAILED", message: "Batch review context requires a batch, workspace, and user." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(input.batchId)}/review-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        context: input.context,
+      }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    await response.json();
+    return;
+  }
+
+  writeStoredReviewContext({
+    batchId: input.batchId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    context: input.context,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function lifecycleSummary(stage: RowLifecycleStage, readiness: ReadinessState) {
+  if (stage === "READY_FOR_SUBMISSION_PREP" && readiness === "READY") {
+    return "Row is ready for submission prep.";
+  }
+
+  if (stage === "NEEDS_CORRECTION") {
+    return "Row needs correction before submission prep.";
+  }
+
+  if (stage === "READINESS_EVALUATED") {
+    return "Row readiness evaluated.";
+  }
+
+  return "Row is intake-ready.";
+}
+
+function buildRowIssues(input: { issueSummaries: ReadinessIssueSummaryDto[]; readinessState: ReadinessState; batchId: string; rowId: string }): RowIssueDetailDto[] {
+  return input.issueSummaries.map((issue) => {
+    const needsCorrection = input.readinessState !== "READY" && input.readinessState !== "READY_WITH_AUGMENTATION";
+    const nextActionLabel = needsCorrection ? "Review correction path" : "Review readiness state";
+    const nextActionHref = needsCorrection ? `/batches/${encodeURIComponent(input.batchId)}/mapping?correction=${encodeURIComponent(input.rowId)}` : undefined;
+
+    return {
+      severity: needsCorrection ? "BLOCKER" : "WARNING",
+      code: issue.code,
+      reason: issue.message,
+      nextActionLabel,
+      nextActionHref,
+    };
+  });
+}
+
+export interface GetBatchRowDetailInput {
+  batchId: string;
+  rowId: string;
+  organizationId: string;
+}
+
+export interface CorrectBatchRowInput {
+  batchId: string;
+  rowId: string;
+  organizationId: string;
+  baseRowRevision: number;
+  createdBy?: string;
+  patch: {
+    title?: string;
+    brand?: string;
+    gtin?: string;
+    productType?: string;
+    forcedMatchAsin?: string;
+    imageIds?: string[];
+  };
+}
+
+function upsertNormalizedField(normalizedFields: NormalizedFieldDto[], field: string, label: string, value: string) {
+  const trimmed = value ?? "";
+  const index = normalizedFields.findIndex((item) => item.field === field);
+  const next = {
+    field,
+    label,
+    rawValue: trimmed,
+    normalizedValue: trimmed,
+    confidence: 1,
+    status: "MAPPED" as const,
+  };
+
+  if (index === -1) {
+    return [...normalizedFields, next];
+  }
+
+  const updated = [...normalizedFields];
+  updated[index] = { ...updated[index], ...next };
+  return updated;
+}
+
+function applyRowPatchLocal(row: BatchIntakeRowDto, organizationId: string, patch: CorrectBatchRowInput["patch"]): BatchIntakeRowDto {
+  let normalizedFields = row.normalizedFields;
+  let productName = row.productName;
+  let brand = row.brand;
+  let originalImageIds = row.originalImageIds;
+  let resolvedAssets = row.resolvedAssets;
+  let imageIssues = row.imageIssues;
+  let interpretationIssues = row.interpretationIssues;
+  let interpretationStatus = row.interpretationStatus;
+
+  if (patch.title !== undefined) {
+    productName = patch.title || "Untitled product";
+    normalizedFields = upsertNormalizedField(normalizedFields, "title", "Product title", patch.title);
+  }
+
+  if (patch.brand !== undefined) {
+    brand = patch.brand || "Unknown brand";
+    normalizedFields = upsertNormalizedField(normalizedFields, "brand", "Brand", patch.brand);
+  }
+
+  if (patch.gtin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "gtin", "GTIN", patch.gtin);
+  }
+
+  if (patch.productType !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "product_type", "Product type", patch.productType);
+  }
+
+  if (patch.forcedMatchAsin !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "forced_match_asin", "Forced match ASIN", patch.forcedMatchAsin);
+  }
+
+  if (patch.imageIds !== undefined) {
+    originalImageIds = patch.imageIds.filter(Boolean);
+    const images = resolveImageReferences(originalImageIds, organizationId);
+    resolvedAssets = images.resolvedAssets;
+    imageIssues = images.imageIssues;
+    interpretationIssues = imageIssues.map((issue) => ({
+      code: "UNRESOLVED_IMAGE_REFERENCE" as const,
+      label: "Unresolved image reference",
+      field: "image references",
+      message: issue.message,
+      correctionHint: issue.recoveryHint,
+    }));
+    interpretationStatus = interpretationIssues.length > 0 ? "NEEDS_CORRECTION" : "READY_FOR_REVIEW";
+  }
+
+  return {
+    ...row,
+    intakeAttempt: row.intakeAttempt + 1,
+    rowRevision: row.rowRevision + 1,
+    productName,
+    brand,
+    originalImageIds,
+    normalizedFields,
+    interpretationStatus,
+    interpretationIssues,
+    resolvedAssets,
+    imageIssues,
+  };
+}
+
+export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetBatchRowDetailInput): Promise<BatchReadinessRowDetailDto> {
+  if (!batchId || !rowId || !organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Row detail requires a batch, row, and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(
+      `/api/batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    );
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    return (await response.json()) as BatchReadinessRowDetailDto;
+  }
+
+  const readiness = loadStoredReadiness(batchId, organizationId);
+  const review = loadStoredReview(batchId, organizationId);
+
+  const readinessRow = readiness?.rows.find((row) => row.rowId === rowId);
+
+  if (!readinessRow || !readiness) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Row detail was not found. Run readiness evaluation before opening the inspector.",
+    } satisfies BatchApiError;
+  }
+
+  const intakeRow =
+    review?.rows.find((row) => row.rowId === rowId && row.rowRevision === readinessRow.rowRevision) ??
+    review?.rows.find((row) => row.rowId === rowId) ??
+    null;
+
+  const issueSummaries = readinessRow.issueSummaries;
+  const productTypeDecision = intakeRow ? computeProductTypeDecisionLocal(intakeRow, null) : null;
+  const lifecycleHistory: RowLifecycleEntryDto[] = [
+    {
+      timestamp: readinessRow.updatedAt,
+      lifecycleStage: readinessRow.lifecycleStage,
+      readinessState: readinessRow.readinessState,
+      summary: lifecycleSummary(readinessRow.lifecycleStage, readinessRow.readinessState),
+    },
+  ];
+
+  return {
+    rowId: readinessRow.rowId,
+    batchId,
+    organizationId,
+    sourceRowNumber: readinessRow.sourceRowNumber,
+    sourceRowKey: readinessRow.sourceRowKey,
+    intakeAttempt: intakeRow?.intakeAttempt ?? 1,
+    rowRevision: readinessRow.rowRevision,
+    sku: readinessRow.sku,
+    productName: readinessRow.productName,
+    brand: readinessRow.brand,
+    readinessState: readinessRow.readinessState,
+    lifecycleStage: readinessRow.lifecycleStage,
+    issueSummaries,
+    productTypeDecision,
+    issues: buildRowIssues({ issueSummaries, readinessState: readinessRow.readinessState, batchId, rowId }),
+    imageEvidence: readinessRow.imageEvidence,
+    normalizedFields: intakeRow?.normalizedFields ?? [],
+    originalImageIds: intakeRow?.originalImageIds ?? [],
+    lifecycleHistory,
+    evaluatedAt: readiness.evaluatedAt,
+    updatedAt: readinessRow.updatedAt,
+  };
+}
+
+export async function correctBatchRow(input: CorrectBatchRowInput): Promise<BatchReadinessRowDetailDto> {
+  if (!input.batchId || !input.rowId || !input.organizationId) {
+    throw { code: "INTAKE_FAILED", message: "Row correction requires a batch, row, and workspace." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(input.batchId)}/rows/${encodeURIComponent(input.rowId)}/corrections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organizationId: input.organizationId,
+        createdBy: input.createdBy,
+        baseRowRevision: input.baseRowRevision,
+        patch: input.patch,
+      }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    await response.json();
+    return getBatchRowDetail({ batchId: input.batchId, rowId: input.rowId, organizationId: input.organizationId });
+  }
+
+  const review = loadStoredReview(input.batchId, input.organizationId);
+
+  if (!review) {
+    throw {
+      code: "INTAKE_FAILED",
+      message: "Batch intake data was not found. Create the batch from a spreadsheet before correcting rows.",
+    } satisfies BatchApiError;
+  }
+
+  const rowIndex = review.rows.findIndex((row) => row.rowId === input.rowId);
+
+  if (rowIndex === -1) {
+    throw { code: "INTAKE_FAILED", message: "Row could not be found for correction." } satisfies BatchApiError;
+  }
+
+  const current = review.rows[rowIndex];
+
+  if (input.baseRowRevision && current.rowRevision !== input.baseRowRevision) {
+    throw { code: "INTAKE_FAILED", message: "Row revision is stale. Refresh before applying corrections." } satisfies BatchApiError;
+  }
+
+  const updatedRow = applyRowPatchLocal(current, input.organizationId, input.patch);
+  const updatedRows = [...review.rows];
+  updatedRows[rowIndex] = updatedRow;
+
+  const updatedReview = finalizeReview({
+    batchId: review.batchId,
+    organizationId: review.organizationId,
+    sourceFile: review.sourceFile,
+    fieldMappings: review.fieldMappings,
+    intakeStatus: resolveReviewStatus(updatedRows),
+    rows: updatedRows,
+  });
+
+  writeStoredReview(updatedReview);
+  await evaluateBatchReadiness({ batchId: input.batchId, organizationId: input.organizationId });
+
+  return getBatchRowDetail({ batchId: input.batchId, rowId: input.rowId, organizationId: input.organizationId });
 }

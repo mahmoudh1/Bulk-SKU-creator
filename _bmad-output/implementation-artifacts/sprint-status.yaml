@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review in a fresh context
 
 generated: 2026-04-26T00:00:00+03:00
-last_updated: 2026-05-04T00:00:00+03:00
+last_updated: 2026-05-03T00:00:00+03:00
 project: Bulk-SKU-Creator
 project_key: NOKEY
 tracking_system: file-system
@@ -58,14 +58,14 @@ development_status:
   2-6-show-intake-processing-state-and-handoff-readiness: review
   epic-2-retrospective: optional
   epic-3: in-progress
-  3-1-evaluate-rows-into-lifecycle-and-readiness-states: ready-for-dev
-  3-2-build-the-batch-triage-workspace-and-status-first-review-grid: ready-for-dev
-  3-3-show-row-detail-with-blocker-warning-and-lifecycle-reasoning: ready-for-dev
-  3-4-validate-identifier-attribute-variant-and-image-rules: ready-for-dev
-  3-5-surface-duplicate-risk-and-block-forced-match-cases: ready-for-dev
-  3-6-correct-rows-in-workflow-and-revalidate-them: ready-for-dev
-  3-7-require-manual-confirmation-for-ambiguous-product-type-resolution: ready-for-dev
-  3-8-preserve-batch-context-and-resume-work-across-sessions: ready-for-dev
+  3-1-evaluate-rows-into-lifecycle-and-readiness-states: review
+  3-2-build-the-batch-triage-workspace-and-status-first-review-grid: review
+  3-3-show-row-detail-with-blocker-warning-and-lifecycle-reasoning: review
+  3-4-validate-identifier-attribute-variant-and-image-rules: review
+  3-5-surface-duplicate-risk-and-block-forced-match-cases: review
+  3-6-correct-rows-in-workflow-and-revalidate-them: review
+  3-7-require-manual-confirmation-for-ambiguous-product-type-resolution: review
+  3-8-preserve-batch-context-and-resume-work-across-sessions: review
   epic-3-retrospective: optional
   epic-4: backlog
   4-1-run-non-critical-ai-enrichment-on-eligible-rows: backlog

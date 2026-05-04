@@ -1,6 +1,6 @@
 # Story 3.8: Preserve Batch Context and Resume Work Across Sessions
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,24 +19,24 @@ so that triage work remains efficient across long sessions and return visits.
 
 ## Tasks / Subtasks
 
-- [ ] Define review context state shape (AC: 1, 2, 3, 4)
-  - [ ] Include batch ID, active filters, sort order, selected row, focused issue/correction, and last viewed timestamp.
-  - [ ] Decide what belongs in URL query params versus persisted server-backed/user-scoped state.
-- [ ] Add URL-driven state to triage workspace (AC: 1, 4)
-  - [ ] Keep filters, sort, selected row, and search represented in stable URL params where practical.
-  - [ ] Preserve state when linking from grid to row detail and back.
-  - [ ] Ensure deep links work after refresh.
-- [ ] Persist resumable context where needed (AC: 2, 3)
-  - [ ] Add a minimal Neon-backed or server API path for recent batch/review context if URL state alone is not enough.
-  - [ ] Keep persisted context subordinate to authoritative row/readiness state.
-- [ ] Integrate context with row correction/revalidation surfaces (AC: 1, 3, 4)
-  - [ ] Preserve correction focus after failed revalidation.
-  - [ ] Preserve selected row after successful revalidation unless the row no longer matches current filters, in which case show clear feedback.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Filters/sort survive row-detail navigation.
-  - [ ] Selected row survives refresh/deep link.
-  - [ ] Unknown/stale context degrades safely.
-  - [ ] Server state remains authoritative after row changes.
+- [x] Define review context state shape (AC: 1, 2, 3, 4)
+  - [x] Include batch ID, active filters, sort order, selected row, focused issue/correction, and last viewed timestamp.
+  - [x] Decide what belongs in URL query params versus persisted server-backed/user-scoped state.
+- [x] Add URL-driven state to triage workspace (AC: 1, 4)
+  - [x] Keep filters, sort, selected row, and search represented in stable URL params where practical.
+  - [x] Preserve state when linking from grid to row detail and back.
+  - [x] Ensure deep links work after refresh.
+- [x] Persist resumable context where needed (AC: 2, 3)
+  - [x] Add a minimal Neon-backed or server API path for recent batch/review context if URL state alone is not enough.
+  - [x] Keep persisted context subordinate to authoritative row/readiness state.
+- [x] Integrate context with row correction/revalidation surfaces (AC: 1, 3, 4)
+  - [x] Preserve correction focus after failed revalidation.
+  - [x] Preserve selected row after successful revalidation unless the row no longer matches current filters, in which case show clear feedback.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Filters/sort survive row-detail navigation.
+  - [x] Selected row survives refresh/deep link.
+  - [x] Unknown/stale context degrades safely.
+  - [x] Server state remains authoritative after row changes.
 
 ## Dev Notes
 
@@ -99,13 +99,26 @@ so that triage work remains efficient across long sessions and return visits.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added URL-driven triage context (q/readiness/issues/sort/row) and ensured navigation between triage and row detail preserves context.
+- Added resumable server-backed review context keyed by org+user+batch, with localStorage fallback in test mode, restoring context on return visits.
+- Added safe degradation for hidden selections and confirmed server state remains authoritative for readiness while UI context persists.
+- Added focused navigation + resume tests; validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/src/routes/pages/TriageWorkspace.tsx
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/test/triage-workspace.test.tsx
+- apps/web/server/bulk-sku-api.ts
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-8-preserve-batch-context-and-resume-work-across-sessions.md
+
+## Change Log
+
+- 2026-05-04: Added URL + persisted review context to preserve triage state across navigation and sessions.
