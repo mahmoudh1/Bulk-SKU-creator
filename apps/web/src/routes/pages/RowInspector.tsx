@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/clerk-react";
 
 import { appPaths } from "@/app/routes/paths";
 import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
@@ -14,6 +15,7 @@ export default function RowInspector() {
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from;
   const queryClient = useQueryClient();
+  const { userId } = useAuth();
 
   const rowQuery = useQuery({
     queryKey: ["batchRowDetail", id, rowId, activeWorkspace?.id],
@@ -27,11 +29,16 @@ export default function RowInspector() {
     () => detail?.normalizedFields.find((field) => field.field === "gtin")?.normalizedValue ?? "",
     [detail?.normalizedFields],
   );
+  const initialProductType = useMemo(
+    () => detail?.productTypeDecision?.confirmedValue ?? detail?.productTypeDecision?.selectedValue ?? "",
+    [detail?.productTypeDecision],
+  );
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
   const [gtin, setGtin] = useState("");
   const [imageIds, setImageIds] = useState("");
+  const [productType, setProductType] = useState("");
 
   useEffect(() => {
     if (!detail) {
@@ -42,7 +49,8 @@ export default function RowInspector() {
     setBrand(detail.brand);
     setGtin(initialGtin);
     setImageIds(detail.originalImageIds.join(" "));
-  }, [detail, initialGtin]);
+    setProductType(initialProductType);
+  }, [detail, initialGtin, initialProductType]);
 
   const correctionMutation = useMutation({
     mutationFn: async () => {
@@ -55,6 +63,7 @@ export default function RowInspector() {
         rowId,
         organizationId: activeWorkspace?.id ?? "",
         baseRowRevision: detail.rowRevision,
+        createdBy: userId ?? undefined,
         patch: {
           title,
           brand,
@@ -80,6 +89,35 @@ export default function RowInspector() {
       brand !== detail.brand ||
       gtin !== initialGtin ||
       imageIds.trim() !== detail.originalImageIds.join(" "));
+
+  const productTypeMutation = useMutation({
+    mutationFn: async () => {
+      if (!detail) {
+        throw new Error("Row detail must load before confirming product type.");
+      }
+
+      if (!productType) {
+        throw new Error("Select a product type before confirming.");
+      }
+
+      return correctBatchRow({
+        batchId: id,
+        rowId,
+        organizationId: activeWorkspace?.id ?? "",
+        baseRowRevision: detail.rowRevision,
+        createdBy: userId ?? undefined,
+        patch: {
+          productType,
+        },
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["batchRowDetail", id, rowId, activeWorkspace?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["batchReadiness", id, activeWorkspace?.id] }),
+      ]);
+    },
+  });
 
   if (!id || !rowId) {
     return (
@@ -313,6 +351,57 @@ export default function RowInspector() {
           )}
         </div>
 
+        {detail.productTypeDecision ? (
+          <div className="border-t border-border pt-4 space-y-3">
+            <div className="label-mono">Product type</div>
+            <div className="text-xs text-muted-foreground">
+              {detail.productTypeDecision.confirmationRequired ? "Manual confirmation required." : "Product type confirmed."}{" "}
+              <span className="label-mono normal-case">({detail.productTypeDecision.reason}, threshold {detail.productTypeDecision.threshold})</span>
+            </div>
+            <ul className="text-xs space-y-1 text-muted-foreground">
+              {detail.productTypeDecision.candidates.map((candidate) => (
+                <li key={candidate.productType} className="flex justify-between gap-3">
+                  <span className="text-foreground">{candidate.productType}</span>
+                  <span className="tabular-nums">{Math.round(candidate.confidence * 100)}%</span>
+                </li>
+              ))}
+            </ul>
+            <label className="block text-xs text-muted-foreground">
+              Confirm selection
+              <select
+                value={productType}
+                onChange={(event) => setProductType(event.target.value)}
+                className="mt-1 h-9 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground"
+              >
+                {detail.productTypeDecision.candidates.map((candidate) => (
+                  <option key={candidate.productType} value={candidate.productType}>
+                    {candidate.productType} ({Math.round(candidate.confidence * 100)}%)
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!productType || productTypeMutation.isPending}
+              onClick={() => productTypeMutation.mutate()}
+              className={`h-9 w-full rounded-sm text-sm font-medium ${
+                !productType || productTypeMutation.isPending
+                  ? "cursor-not-allowed border border-border bg-muted text-muted-foreground"
+                  : "bg-primary text-primary-foreground hover:bg-primary-hover"
+              }`}
+            >
+              {productTypeMutation.isPending ? "Confirming..." : "Confirm product type"}
+            </button>
+            {productTypeMutation.isError ? (
+              <div className="rounded-sm border border-status-blocked-border bg-status-blocked-bg p-2 text-xs text-status-blocked" role="alert">
+                {typeof productTypeMutation.error === "object" && productTypeMutation.error && "message" in productTypeMutation.error
+                  ? String(productTypeMutation.error.message)
+                  : "Product type confirmation failed. Refresh and try again."}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="border-t border-border pt-4 space-y-3">
           <div className="label-mono">Corrections</div>
           <label className="block text-xs text-muted-foreground">
@@ -389,7 +478,7 @@ export default function RowInspector() {
         </div>
 
         <div className="border-t border-border pt-4 text-[11px] text-muted-foreground">
-          This inspector shows persisted source, readiness, and lifecycle data. Edits and revalidation mutations arrive in later stories.
+          This inspector shows persisted source, readiness, and lifecycle data. Corrections create a new row revision and re-run readiness evaluation.
         </div>
       </aside>
     </div>

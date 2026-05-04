@@ -135,6 +135,21 @@ interface ValidationRuleResultDto {
   evidence?: Record<string, unknown>;
 }
 
+interface ProductTypeCandidateDto {
+  productType: string;
+  confidence: number;
+}
+
+interface ProductTypeDecisionDto {
+  candidates: ProductTypeCandidateDto[];
+  threshold: number;
+  selectedValue: string;
+  confirmedValue: string | null;
+  confirmationRequired: boolean;
+  reason: string;
+  decidedBy: string | null;
+}
+
 interface BatchReadinessRowDto {
   rowId: string;
   batchId: string;
@@ -207,6 +222,7 @@ interface BatchReadinessRowDetailDto {
   lifecycleStage: RowLifecycleStage;
   issues: RowIssueDetailDto[];
   issueSummaries: ReadinessIssueSummaryDto[];
+  productTypeDecision: ProductTypeDecisionDto | null;
   validationResults: ValidationRuleResultDto[];
   imageEvidence: ReadinessImageEvidenceDto[];
   normalizedFields: BatchIntakeReviewDto["rows"][number]["normalizedFields"];
@@ -428,6 +444,21 @@ async function ensureSchema() {
 
     create index if not exists batch_row_corrections_batch_idx
       on batch_row_corrections (organization_id, batch_id, updated_at desc);
+
+    create table if not exists batch_row_product_type_decisions (
+      organization_id text not null,
+      batch_id text not null,
+      row_id text not null,
+      row_revision integer not null,
+      decision jsonb not null default '{}'::jsonb,
+      decided_by text,
+      decided_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, row_id, row_revision)
+    );
+
+    create index if not exists batch_row_product_type_decisions_batch_idx
+      on batch_row_product_type_decisions (organization_id, batch_id, updated_at desc);
   `).then(() => undefined);
 
   return schemaReady;
@@ -1091,6 +1122,66 @@ function buildDuplicateContext(rows: BatchIntakeReviewDto["rows"]): DuplicateCon
   return context;
 }
 
+function computeProductTypeDecision(row: BatchIntakeReviewDto["rows"][number], decidedBy: string | null): ProductTypeDecisionDto {
+  const threshold = 0.8;
+  const manual = normalizedValueForField(row, "product_type").normalized.trim();
+
+  if (manual) {
+    return {
+      candidates: [{ productType: manual, confidence: 1 }],
+      threshold,
+      selectedValue: manual,
+      confirmedValue: manual,
+      confirmationRequired: false,
+      reason: "MANUAL_CONFIRMATION",
+      decidedBy,
+    };
+  }
+
+  const title = normalizedValueForField(row, "title").normalized.trim().toLowerCase();
+
+  let candidates: ProductTypeCandidateDto[] = [];
+
+  if (title.includes("lamp")) {
+    candidates = [
+      { productType: "LIGHTING", confidence: 0.92 },
+      { productType: "HOME_DECOR", confidence: 0.72 },
+    ];
+  } else if (title.includes("chair")) {
+    candidates = [
+      { productType: "FURNITURE", confidence: 0.93 },
+      { productType: "HOME_DECOR", confidence: 0.61 },
+    ];
+  } else if (title.includes("mug")) {
+    candidates = [
+      { productType: "KITCHEN", confidence: 0.91 },
+      { productType: "HOME_GOODS", confidence: 0.63 },
+    ];
+  } else {
+    candidates = [
+      { productType: "GENERAL_MERCHANDISE", confidence: 0.62 },
+      { productType: "HOME_GOODS", confidence: 0.59 },
+    ];
+  }
+
+  const [top, second] = candidates;
+  const gap = Math.abs((top?.confidence ?? 0) - (second?.confidence ?? 0));
+  const below = (top?.confidence ?? 0) < threshold;
+  const ambiguous = gap < 0.15;
+  const confirmationRequired = below || ambiguous;
+  const reason = below ? "BELOW_THRESHOLD" : ambiguous ? "AMBIGUOUS" : "CONFIDENT";
+
+  return {
+    candidates,
+    threshold,
+    selectedValue: top?.productType ?? "",
+    confirmedValue: null,
+    confirmationRequired,
+    reason,
+    decidedBy: null,
+  };
+}
+
 function deriveReadinessState(results: ValidationRuleResultDto[]) {
   const impacts = results.map((result) => result.readinessImpact);
 
@@ -1126,6 +1217,7 @@ async function evaluateValidationRules(
   row: BatchIntakeReviewDto["rows"][number],
   organizationId: string,
   duplicateContext: DuplicateContext,
+  productTypeDecision: ProductTypeDecisionDto,
 ): Promise<ValidationRuleResultDto[]> {
   const results: ValidationRuleResultDto[] = [];
 
@@ -1182,6 +1274,20 @@ async function evaluateValidationRules(
       remediationHint: "Provide a brand value in the spreadsheet, then reprocess intake.",
       blocking: true,
       readinessImpact: "NEEDS_INPUT",
+    });
+  }
+
+  if (productTypeDecision.confirmationRequired) {
+    results.push({
+      ruleCode: "PRODUCT_TYPE_CONFIRMATION_REQUIRED",
+      category: "ATTRIBUTE",
+      severity: "BLOCKER",
+      field: "product_type",
+      message: "Product type requires manual confirmation",
+      remediationHint: "Confirm a product type in the row inspector, then revalidate.",
+      blocking: true,
+      readinessImpact: "NEEDS_INPUT",
+      evidence: { productTypeDecision },
     });
   }
 
@@ -1534,6 +1640,36 @@ async function upsertValidationResults(
   return existing.rows[0] ?? { evaluated_at: new Date().toISOString(), updated_at: new Date().toISOString() };
 }
 
+async function upsertProductTypeDecision(
+  client: import("pg").PoolClient,
+  organizationId: string,
+  batchId: string,
+  rowId: string,
+  rowRevision: number,
+  decision: ProductTypeDecisionDto,
+) {
+  const payload = JSON.stringify(decision);
+
+  await client.query(
+    `insert into batch_row_product_type_decisions (
+        organization_id,
+        batch_id,
+        row_id,
+        row_revision,
+        decision,
+        decided_by
+      )
+      values ($1, $2, $3, $4, $5::jsonb, $6)
+      on conflict (organization_id, batch_id, row_id, row_revision) do update set
+        decision = excluded.decision,
+        decided_by = excluded.decided_by,
+        updated_at = now()
+      where batch_row_product_type_decisions.decision is distinct from excluded.decision
+        or batch_row_product_type_decisions.decided_by is distinct from excluded.decided_by`,
+    [organizationId, batchId, rowId, rowRevision, payload, decision.decidedBy],
+  );
+}
+
 async function handleEvaluateReadiness(req: IncomingMessage, res: ServerResponse, batchId: string) {
   const input = await parseJson(req);
   const organizationId = String(input.organizationId ?? "");
@@ -1560,12 +1696,14 @@ async function handleEvaluateReadiness(req: IncomingMessage, res: ServerResponse
     const duplicateContext = buildDuplicateContext(review.rows);
 
     for (const row of review.rows) {
-      const validationResults = await evaluateValidationRules(client, row, organizationId, duplicateContext);
+      const productTypeDecision = computeProductTypeDecision(row, null);
+      const validationResults = await evaluateValidationRules(client, row, organizationId, duplicateContext, productTypeDecision);
       const base = evaluateReadinessRow(row, validationResults);
       const persisted = await upsertReadinessRow(client, organizationId, batchId, base);
       await upsertLifecycleEvent(client, organizationId, batchId, base);
       await upsertValidationEvidence(client, organizationId, batchId, base);
       await upsertValidationResults(client, organizationId, batchId, base.rowId, base.rowRevision, validationResults);
+      await upsertProductTypeDecision(client, organizationId, batchId, base.rowId, base.rowRevision, productTypeDecision);
       rows.push(persisted);
     }
 
@@ -1706,6 +1844,7 @@ type RowCorrectionPatchDto = {
   title?: string;
   brand?: string;
   gtin?: string;
+  productType?: string;
   forcedMatchAsin?: string;
   imageIds?: string[];
 };
@@ -1763,6 +1902,10 @@ async function applyRowPatch(
 
   if (patch.gtin !== undefined) {
     normalizedFields = upsertNormalizedField(normalizedFields, "gtin", "GTIN", patch.gtin);
+  }
+
+  if (patch.productType !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "product_type", "Product type", patch.productType);
   }
 
   if (patch.forcedMatchAsin !== undefined) {
@@ -1893,7 +2036,8 @@ async function handleCorrectRow(req: IncomingMessage, res: ServerResponse, batch
     const duplicateContext = buildDuplicateContext(
       review.rows.map((row) => (row.rowId === rowId ? nextSnapshot : row)),
     );
-    const validationResults = await evaluateValidationRules(client, nextSnapshot, organizationId, duplicateContext);
+    const productTypeDecision = computeProductTypeDecision(nextSnapshot, createdBy);
+    const validationResults = await evaluateValidationRules(client, nextSnapshot, organizationId, duplicateContext, productTypeDecision);
     const base = evaluateReadinessRow(nextSnapshot, validationResults);
 
     await client.query(
@@ -1918,6 +2062,7 @@ async function handleCorrectRow(req: IncomingMessage, res: ServerResponse, batch
     await upsertLifecycleEvent(client, organizationId, batchId, base);
     await upsertValidationEvidence(client, organizationId, batchId, base);
     await upsertValidationResults(client, organizationId, batchId, base.rowId, base.rowRevision, validationResults);
+    await upsertProductTypeDecision(client, organizationId, batchId, base.rowId, base.rowRevision, productTypeDecision);
 
     await client.query("commit");
 
@@ -2026,6 +2171,13 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
   }));
 
   const validationResults = Array.isArray(readiness.validation_results) ? readiness.validation_results : [];
+  const productTypeResult = await getPool().query<{ decision: ProductTypeDecisionDto }>(
+    `select decision
+       from batch_row_product_type_decisions
+      where organization_id = $1 and batch_id = $2 and row_id = $3 and row_revision = $4`,
+    [organizationId, batchId, rowId, readiness.row_revision],
+  );
+  const productTypeDecision = productTypeResult.rows[0]?.decision ?? null;
 
   const detail: BatchReadinessRowDetailDto = {
     rowId,
@@ -2041,6 +2193,7 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
     readinessState: readiness.readiness_state,
     lifecycleStage: readiness.lifecycle_stage,
     issueSummaries: Array.isArray(readiness.issue_summaries) ? readiness.issue_summaries : [],
+    productTypeDecision,
     issues: buildRowIssues({
       validationResults,
       batchId,

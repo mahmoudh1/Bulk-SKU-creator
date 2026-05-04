@@ -1,6 +1,6 @@
 # Story 3.7: Require Manual Confirmation for Ambiguous Product Type Resolution
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,22 +19,22 @@ so that the system does not proceed on low-confidence classification.
 
 ## Tasks / Subtasks
 
-- [ ] Add product-type ambiguity state to readiness model (AC: 1)
-  - [ ] Store candidate product types, confidence values, threshold, selected/confirmed value, and confirmation-required flag.
-  - [ ] Mark low-confidence product type as `NEEDS_INPUT` or equivalent non-ready state.
-- [ ] Surface confirmation path in row detail (AC: 2, 4)
-  - [ ] Show ambiguity reason and candidates.
-  - [ ] Provide confirmation controls in the diagnostic action rail or row detail section.
-  - [ ] Do not show ambiguous rows as ready for submission.
-- [ ] Persist confirmation and revalidate (AC: 2, 3, 4)
-  - [ ] Add mutation to confirm product type with row revision and actor.
-  - [ ] Re-run readiness validation after confirmation.
-  - [ ] Store confirmation event in lifecycle/history.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Low confidence requires confirmation.
-  - [ ] Confirmation persists with row revision/user.
-  - [ ] Revalidation uses confirmed type.
-  - [ ] Ambiguous row is not considered ready.
+- [x] Add product-type ambiguity state to readiness model (AC: 1)
+  - [x] Store candidate product types, confidence values, threshold, selected/confirmed value, and confirmation-required flag.
+  - [x] Mark low-confidence product type as `NEEDS_INPUT` or equivalent non-ready state.
+- [x] Surface confirmation path in row detail (AC: 2, 4)
+  - [x] Show ambiguity reason and candidates.
+  - [x] Provide confirmation controls in the diagnostic action rail or row detail section.
+  - [x] Do not show ambiguous rows as ready for submission.
+- [x] Persist confirmation and revalidate (AC: 2, 3, 4)
+  - [x] Add mutation to confirm product type with row revision and actor.
+  - [x] Re-run readiness validation after confirmation.
+  - [x] Store confirmation event in lifecycle/history.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Low confidence requires confirmation.
+  - [x] Confirmation persists with row revision/user.
+  - [x] Revalidation uses confirmed type.
+  - [x] Ambiguous row is not considered ready.
 
 ## Dev Notes
 
@@ -96,13 +96,26 @@ so that the system does not proceed on low-confidence classification.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added persisted product-type decision storage (candidates, confidence, threshold, selected/confirmed value, confirmation-required flag) and blocked low-confidence rows from being treated as ready.
+- Surfaced ambiguity + candidate list in RowInspector and added a single primary confirmation action that creates a new row revision and revalidates.
+- Wired confirmation through the existing correction/revalidation path and recorded the confirming actor when available.
+- Added focused tests for ambiguous detection and confirmation-driven revalidation; validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/server/bulk-sku-api.ts
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/routes/pages/RowInspector.tsx
+- apps/web/src/test/product-type-confirmation.test.ts
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-7-require-manual-confirmation-for-ambiguous-product-type-resolution.md
+
+## Change Log
+
+- 2026-05-04: Added manual product-type confirmation for ambiguous rows with persisted decisions, UI confirmation, and tests.

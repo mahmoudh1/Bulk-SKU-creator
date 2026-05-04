@@ -941,13 +941,28 @@ export type ReadinessState = "READY" | "READY_WITH_AUGMENTATION" | "NEEDS_INPUT"
 export type RowLifecycleStage = "INTAKE_READY" | "READINESS_EVALUATED" | "NEEDS_CORRECTION" | "READY_FOR_SUBMISSION_PREP";
 
 export interface ReadinessIssueSummaryDto {
-  code: IntakeInterpretationIssueCode | ImageIntakeIssueCode;
+  code: string;
   message: string;
 }
 
 export interface ReadinessImageEvidenceDto {
   imageId: string;
   previewRef: string;
+}
+
+export interface ProductTypeCandidateDto {
+  productType: string;
+  confidence: number;
+}
+
+export interface ProductTypeDecisionDto {
+  candidates: ProductTypeCandidateDto[];
+  threshold: number;
+  selectedValue: string;
+  confirmedValue: string | null;
+  confirmationRequired: boolean;
+  reason: string;
+  decidedBy: string | null;
 }
 
 export interface BatchReadinessRowDto {
@@ -1020,6 +1035,7 @@ export interface BatchReadinessRowDetailDto {
   lifecycleStage: RowLifecycleStage;
   issues: RowIssueDetailDto[];
   issueSummaries: ReadinessIssueSummaryDto[];
+  productTypeDecision: ProductTypeDecisionDto | null;
   imageEvidence: ReadinessImageEvidenceDto[];
   normalizedFields: NormalizedFieldDto[];
   originalImageIds: string[];
@@ -1085,11 +1101,86 @@ function readinessStableHash(
   });
 }
 
+function normalizedValueForField(row: BatchIntakeRowDto, field: string) {
+  const match = row.normalizedFields.find((item) => item.field === field);
+  return {
+    raw: match?.rawValue ?? "",
+    normalized: match?.normalizedValue ?? "",
+  };
+}
+
+function computeProductTypeDecisionLocal(row: BatchIntakeRowDto, decidedBy: string | null): ProductTypeDecisionDto {
+  const threshold = 0.8;
+  const manual = normalizedValueForField(row, "product_type").normalized.trim();
+
+  if (manual) {
+    return {
+      candidates: [{ productType: manual, confidence: 1 }],
+      threshold,
+      selectedValue: manual,
+      confirmedValue: manual,
+      confirmationRequired: false,
+      reason: "MANUAL_CONFIRMATION",
+      decidedBy,
+    };
+  }
+
+  const title = normalizedValueForField(row, "title").normalized.trim().toLowerCase();
+  let candidates: ProductTypeCandidateDto[] = [];
+
+  if (title.includes("lamp")) {
+    candidates = [
+      { productType: "LIGHTING", confidence: 0.92 },
+      { productType: "HOME_DECOR", confidence: 0.72 },
+    ];
+  } else if (title.includes("chair")) {
+    candidates = [
+      { productType: "FURNITURE", confidence: 0.93 },
+      { productType: "HOME_DECOR", confidence: 0.61 },
+    ];
+  } else if (title.includes("mug")) {
+    candidates = [
+      { productType: "KITCHEN", confidence: 0.91 },
+      { productType: "HOME_GOODS", confidence: 0.63 },
+    ];
+  } else {
+    candidates = [
+      { productType: "GENERAL_MERCHANDISE", confidence: 0.62 },
+      { productType: "HOME_GOODS", confidence: 0.59 },
+    ];
+  }
+
+  const [top, second] = candidates;
+  const gap = Math.abs((top?.confidence ?? 0) - (second?.confidence ?? 0));
+  const below = (top?.confidence ?? 0) < threshold;
+  const ambiguous = gap < 0.15;
+  const confirmationRequired = below || ambiguous;
+  const reason = below ? "BELOW_THRESHOLD" : ambiguous ? "AMBIGUOUS" : "CONFIDENT";
+
+  return {
+    candidates,
+    threshold,
+    selectedValue: top?.productType ?? "",
+    confirmedValue: null,
+    confirmationRequired,
+    reason,
+    decidedBy: null,
+  };
+}
+
 function evaluateReadinessRow(row: BatchIntakeRowDto): Omit<BatchReadinessRowDto, "evaluatedAt" | "updatedAt"> {
+  const productTypeDecision = computeProductTypeDecisionLocal(row, null);
   const issueSummaries: ReadinessIssueSummaryDto[] = [
     ...row.interpretationIssues.map((issue) => ({ code: issue.code, message: issue.message })),
     ...row.imageIssues.map((issue) => ({ code: issue.code, message: issue.message })),
   ];
+
+  if (productTypeDecision.confirmationRequired) {
+    issueSummaries.push({
+      code: "PRODUCT_TYPE_CONFIRMATION_REQUIRED",
+      message: "Product type requires manual confirmation",
+    });
+  }
   const readinessState: ReadinessState = issueSummaries.length > 0 ? "NEEDS_INPUT" : "READY";
   const lifecycleStage: RowLifecycleStage = readinessState === "READY" ? "READY_FOR_SUBMISSION_PREP" : "NEEDS_CORRECTION";
   const imageEvidence = row.resolvedAssets.map((asset) => ({ imageId: asset.imageId, previewRef: asset.previewRef }));
@@ -1259,10 +1350,12 @@ export interface CorrectBatchRowInput {
   rowId: string;
   organizationId: string;
   baseRowRevision: number;
+  createdBy?: string;
   patch: {
     title?: string;
     brand?: string;
     gtin?: string;
+    productType?: string;
     forcedMatchAsin?: string;
     imageIds?: string[];
   };
@@ -1311,6 +1404,10 @@ function applyRowPatchLocal(row: BatchIntakeRowDto, organizationId: string, patc
 
   if (patch.gtin !== undefined) {
     normalizedFields = upsertNormalizedField(normalizedFields, "gtin", "GTIN", patch.gtin);
+  }
+
+  if (patch.productType !== undefined) {
+    normalizedFields = upsertNormalizedField(normalizedFields, "product_type", "Product type", patch.productType);
   }
 
   if (patch.forcedMatchAsin !== undefined) {
@@ -1382,6 +1479,7 @@ export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetB
     null;
 
   const issueSummaries = readinessRow.issueSummaries;
+  const productTypeDecision = intakeRow ? computeProductTypeDecisionLocal(intakeRow, null) : null;
   const lifecycleHistory: RowLifecycleEntryDto[] = [
     {
       timestamp: readinessRow.updatedAt,
@@ -1405,6 +1503,7 @@ export async function getBatchRowDetail({ batchId, rowId, organizationId }: GetB
     readinessState: readinessRow.readinessState,
     lifecycleStage: readinessRow.lifecycleStage,
     issueSummaries,
+    productTypeDecision,
     issues: buildRowIssues({ issueSummaries, readinessState: readinessRow.readinessState, batchId, rowId }),
     imageEvidence: readinessRow.imageEvidence,
     normalizedFields: intakeRow?.normalizedFields ?? [],
@@ -1426,6 +1525,7 @@ export async function correctBatchRow(input: CorrectBatchRowInput): Promise<Batc
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         organizationId: input.organizationId,
+        createdBy: input.createdBy,
         baseRowRevision: input.baseRowRevision,
         patch: input.patch,
       }),

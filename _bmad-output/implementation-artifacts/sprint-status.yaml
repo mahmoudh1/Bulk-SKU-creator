@@ -64,7 +64,7 @@ development_status:
   3-4-validate-identifier-attribute-variant-and-image-rules: review
   3-5-surface-duplicate-risk-and-block-forced-match-cases: review
   3-6-correct-rows-in-workflow-and-revalidate-them: review
-  3-7-require-manual-confirmation-for-ambiguous-product-type-resolution: ready-for-dev
+  3-7-require-manual-confirmation-for-ambiguous-product-type-resolution: review
   3-8-preserve-batch-context-and-resume-work-across-sessions: ready-for-dev
   epic-3-retrospective: optional
   epic-4: backlog
