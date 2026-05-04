@@ -1,12 +1,13 @@
-import { Link, useLocation, useParams } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/clerk-react";
 
 import { appPaths } from "@/app/routes/paths";
 import { useOrganizationContext } from "@/app/organizations/OrganizationProvider";
 import { StatusChip, SubmissionChip } from "@/components/StatusChip";
 import { Search, Filter, Send, Sparkles, AlertOctagon, ExternalLink, X, ChevronRight, RotateCw } from "lucide-react";
-import { getBatchReadiness, type BatchReadinessRowDto, type ReadinessState } from "@/lib/api-client/batches";
+import { getBatchReadiness, getBatchReviewContext, saveBatchReviewContext, type BatchReadinessRowDto, type ReadinessState } from "@/lib/api-client/batches";
 
 const toneCls: Record<string, string> = {
   ready: "border-status-ready-border text-status-ready",
@@ -52,11 +53,47 @@ export default function TriageWorkspace() {
   const { id } = useParams();
   const { activeWorkspace } = useOrganizationContext();
   const location = useLocation();
-  const [search, setSearch] = useState("");
-  const [readinessFilter, setReadinessFilter] = useState<ReadinessState | "ALL">("ALL");
-  const [onlyIssues, setOnlyIssues] = useState(false);
-  const [sort, setSort] = useState<"priority" | "updated">("priority");
-  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { userId } = useAuth();
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
+  const [readinessFilter, setReadinessFilter] = useState<ReadinessState | "ALL">(
+    (searchParams.get("readiness") as ReadinessState | "ALL" | null) ?? "ALL",
+  );
+  const [onlyIssues, setOnlyIssues] = useState(searchParams.get("issues") === "1");
+  const [sort, setSort] = useState<"priority" | "updated">((searchParams.get("sort") as "priority" | "updated" | null) ?? "priority");
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(searchParams.get("row"));
+
+  const updateSearchParams = (next: Record<string, string | null>) => {
+    const updated = new URLSearchParams(searchParams);
+
+    for (const [key, value] of Object.entries(next)) {
+      if (!value) {
+        updated.delete(key);
+      } else {
+        updated.set(key, value);
+      }
+    }
+
+    setSearchParams(updated, { replace: true });
+  };
+
+  useEffect(() => {
+    setSearch(searchParams.get("q") ?? "");
+    const readinessParam = searchParams.get("readiness");
+    const isKnownReadiness =
+      readinessParam === "READY" ||
+      readinessParam === "READY_WITH_AUGMENTATION" ||
+      readinessParam === "NEEDS_INPUT" ||
+      readinessParam === "NOT_ENOUGH_DATA" ||
+      readinessParam === "BLOCKED_FOR_REVIEW" ||
+      readinessParam === "ALL" ||
+      readinessParam === null;
+    setReadinessFilter(isKnownReadiness ? ((readinessParam as ReadinessState | "ALL" | null) ?? "ALL") : "ALL");
+    setOnlyIssues(searchParams.get("issues") === "1");
+    const sortParam = searchParams.get("sort");
+    setSort(sortParam === "updated" ? "updated" : "priority");
+    setSelectedRowId(searchParams.get("row"));
+  }, [searchParams]);
 
   const readinessQuery = useQuery({
     queryKey: ["batchReadiness", id, activeWorkspace?.id],
@@ -72,6 +109,60 @@ export default function TriageWorkspace() {
   );
   const batchId = id ?? "";
   const returnContext = `${location.pathname}${location.search}`;
+
+  useEffect(() => {
+    if (!batchId || !activeWorkspace?.id || !userId) {
+      return;
+    }
+
+    if (location.search) {
+      return;
+    }
+
+    let cancelled = false;
+
+    getBatchReviewContext({ batchId, organizationId: activeWorkspace.id, userId })
+      .then((stored) => {
+        if (cancelled || !stored?.context) {
+          return;
+        }
+
+        const nextEntries = Object.entries(stored.context).filter(([key, value]) => key !== "lv" && value);
+        if (nextEntries.length === 0) {
+          return;
+        }
+
+        setSearchParams(new URLSearchParams(nextEntries), { replace: true });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace?.id, batchId, location.search, setSearchParams, userId]);
+
+  useEffect(() => {
+    if (!batchId || !activeWorkspace?.id || !userId) {
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      const context: Record<string, string> = {
+        ...(search ? { q: search } : {}),
+        ...(readinessFilter !== "ALL" ? { readiness: readinessFilter } : {}),
+        ...(onlyIssues ? { issues: "1" } : {}),
+        ...(sort !== "priority" ? { sort } : {}),
+        ...(selectedRowId ? { row: selectedRowId } : {}),
+        lv: new Date().toISOString(),
+      };
+
+      saveBatchReviewContext({ batchId, organizationId: activeWorkspace.id, userId, context }).catch(() => undefined);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [activeWorkspace?.id, batchId, onlyIssues, readinessFilter, search, selectedRowId, sort, userId]);
 
   const filteredRows = useMemo(() => {
     const base = rows.filter((row) => rowMatchesSearch(row, search));
@@ -97,6 +188,14 @@ export default function TriageWorkspace() {
     const match = selectedRowId ? rows.find((row) => row.rowId === selectedRowId) : null;
     return match ?? filteredRows[0] ?? null;
   }, [filteredRows, rows, selectedRowId]);
+
+  const selectedHidden = useMemo(() => {
+    if (!selectedRowId) {
+      return false;
+    }
+
+    return !filteredRows.some((row) => row.rowId === selectedRowId);
+  }, [filteredRows, selectedRowId]);
 
   const readyForSubmission = summary.blocked + summary.needsInput + summary.notEnoughData === 0;
 
@@ -212,7 +311,14 @@ export default function TriageWorkspace() {
                 <span className="font-medium text-foreground">Fix these first:</span>
                 <span className="text-foreground/80"> {summary.blocked} blocked rows, then {summary.needsInput} needs input.</span>
               </div>
-              <button type="button" onClick={() => setOnlyIssues(true)} className="text-xs text-primary hover:underline shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setOnlyIssues(true);
+                  updateSearchParams({ issues: "1" });
+                }}
+                className="text-xs text-primary hover:underline shrink-0"
+              >
                 Show only blockers
               </button>
             </div>
@@ -226,7 +332,11 @@ export default function TriageWorkspace() {
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <input
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setSearch(next);
+                    updateSearchParams({ q: next || null });
+                  }}
                   className="flex-1 bg-transparent text-sm outline-none"
                   placeholder="Row ID, SKU, product name…"
                 />
@@ -239,7 +349,11 @@ export default function TriageWorkspace() {
                   Sort
                   <select
                     value={sort}
-                    onChange={(event) => setSort(event.target.value as "priority" | "updated")}
+                    onChange={(event) => {
+                      const next = event.target.value as "priority" | "updated";
+                      setSort(next);
+                      updateSearchParams({ sort: next === "priority" ? null : next });
+                    }}
                     className="h-8 rounded-sm border border-border bg-background px-2 text-xs text-foreground"
                   >
                     <option value="priority">Priority</option>
@@ -247,7 +361,14 @@ export default function TriageWorkspace() {
                   </select>
                 </label>
                 {onlyIssues ? (
-                  <button type="button" onClick={() => setOnlyIssues(false)} className="h-8 px-2.5 rounded-sm border border-border bg-background text-xs hover:bg-muted inline-flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOnlyIssues(false);
+                      updateSearchParams({ issues: null });
+                    }}
+                    className="h-8 px-2.5 rounded-sm border border-border bg-background text-xs hover:bg-muted inline-flex items-center gap-1.5"
+                  >
                     <X className="h-3 w-3" />
                     Clear blockers
                   </button>
@@ -261,7 +382,10 @@ export default function TriageWorkspace() {
                     <button
                       key={f.label}
                       type="button"
-                      onClick={() => setReadinessFilter(f.value)}
+                      onClick={() => {
+                        setReadinessFilter(f.value);
+                        updateSearchParams({ readiness: f.value === "ALL" ? null : f.value });
+                      }}
                       className={`h-7 px-2.5 rounded-sm text-xs whitespace-nowrap border inline-flex items-center gap-1.5 ${
                         active ? "bg-primary text-primary-foreground border-primary" : f.tone ? `bg-card hover:bg-muted ${toneCls[f.tone]}` : "bg-card border-border hover:bg-muted"
                       }`}
@@ -278,6 +402,21 @@ export default function TriageWorkspace() {
             </div>
 
             <div className="flex-1 overflow-auto">
+              {selectedHidden ? (
+                <div className="px-4 py-2 border-b border-border bg-status-needs-input-bg/30 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                  <span>Selected row is hidden by current filters.</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedRowId(null);
+                      updateSearchParams({ row: null });
+                    }}
+                    className="text-primary hover:underline"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              ) : null}
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-card border-b border-border z-10">
                   <tr className="text-left label-mono">
@@ -297,7 +436,10 @@ export default function TriageWorkspace() {
                     const blockerText = issuePreview(r);
                     return (
                       <tr key={r.rowId}
-                          onClick={() => setSelectedRowId(r.rowId)}
+                          onClick={() => {
+                            setSelectedRowId(r.rowId);
+                            updateSearchParams({ row: r.rowId });
+                          }}
                           className={`cursor-pointer ${isSel ? "bg-status-submitted-bg/60" : "hover:bg-muted/40"}`}>
                         <td className="px-3 py-2.5"><input type="checkbox" className="accent-primary" onClick={(e) => e.stopPropagation()} /></td>
                         <td className="px-2 py-2.5">

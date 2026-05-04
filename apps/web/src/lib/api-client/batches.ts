@@ -1045,6 +1045,7 @@ export interface BatchReadinessRowDetailDto {
 }
 
 const batchReadinessStorageKey = "bulk-sku-creator:batch-readiness-evaluations:v1";
+const batchReviewContextStorageKey = "bulk-sku-creator:batch-review-contexts:v1";
 
 function readStoredReadiness(): Record<string, BatchReadinessEvaluationDto> {
   if (!canUseBrowserStorage()) {
@@ -1057,6 +1058,45 @@ function readStoredReadiness(): Record<string, BatchReadinessEvaluationDto> {
   } catch {
     return {};
   }
+}
+
+export interface BatchReviewContextDto {
+  batchId: string;
+  organizationId: string;
+  userId: string;
+  context: Record<string, string>;
+  updatedAt: string;
+}
+
+function readStoredReviewContexts(): Record<string, BatchReviewContextDto> {
+  if (!canUseBrowserStorage()) {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(batchReviewContextStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, BatchReviewContextDto>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredReviewContext(entry: BatchReviewContextDto) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    batchReviewContextStorageKey,
+    JSON.stringify({
+      ...readStoredReviewContexts(),
+      [`${entry.organizationId}:${entry.userId}:${entry.batchId}`]: entry,
+    }),
+  );
+}
+
+function loadStoredReviewContext(batchId: string, organizationId: string, userId: string) {
+  return readStoredReviewContexts()[`${organizationId}:${userId}:${batchId}`] ?? null;
 }
 
 function writeStoredReadiness(evaluation: BatchReadinessEvaluationDto) {
@@ -1305,6 +1345,71 @@ export async function getBatchReadiness({ batchId, organizationId }: EvaluateBat
   }
 
   return readiness;
+}
+
+export async function getBatchReviewContext(input: { batchId: string; organizationId: string; userId: string }): Promise<BatchReviewContextDto | null> {
+  if (!input.batchId || !input.organizationId || !input.userId) {
+    throw { code: "INTAKE_FAILED", message: "Batch review context requires a batch, workspace, and user." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(
+      `/api/batches/${encodeURIComponent(input.batchId)}/review-context?organizationId=${encodeURIComponent(input.organizationId)}&userId=${encodeURIComponent(input.userId)}`,
+    );
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    const payload = (await response.json()) as { context: Record<string, string>; updatedAt: string } | null;
+
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      batchId: input.batchId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      context: payload.context ?? {},
+      updatedAt: payload.updatedAt,
+    };
+  }
+
+  return loadStoredReviewContext(input.batchId, input.organizationId, input.userId);
+}
+
+export async function saveBatchReviewContext(input: { batchId: string; organizationId: string; userId: string; context: Record<string, string> }) {
+  if (!input.batchId || !input.organizationId || !input.userId) {
+    throw { code: "INTAKE_FAILED", message: "Batch review context requires a batch, workspace, and user." } satisfies BatchApiError;
+  }
+
+  if (!shouldUseLocalFallback()) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(input.batchId)}/review-context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        context: input.context,
+      }),
+    });
+
+    if (!response.ok) {
+      throw await parseApiError(response);
+    }
+
+    await response.json();
+    return;
+  }
+
+  writeStoredReviewContext({
+    batchId: input.batchId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    context: input.context,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 function lifecycleSummary(stage: RowLifecycleStage, readiness: ReadinessState) {

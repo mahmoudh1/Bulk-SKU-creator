@@ -459,6 +459,18 @@ async function ensureSchema() {
 
     create index if not exists batch_row_product_type_decisions_batch_idx
       on batch_row_product_type_decisions (organization_id, batch_id, updated_at desc);
+
+    create table if not exists batch_review_contexts (
+      organization_id text not null,
+      batch_id text not null,
+      user_id text not null,
+      context jsonb not null default '{}'::jsonb,
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, batch_id, user_id)
+    );
+
+    create index if not exists batch_review_contexts_batch_idx
+      on batch_review_contexts (organization_id, batch_id, updated_at desc);
   `).then(() => undefined);
 
   return schemaReady;
@@ -2211,6 +2223,52 @@ async function handleGetRowDetail(req: IncomingMessage, res: ServerResponse, bat
   sendJson(res, 200, detail);
 }
 
+async function handleGetReviewContext(req: IncomingMessage, res: ServerResponse, batchId: string) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const organizationId = url.searchParams.get("organizationId") ?? "";
+  const userId = url.searchParams.get("userId") ?? "";
+
+  if (!organizationId || !userId) {
+    return sendError(res, 400, "MISSING_CONTEXT", "Organization and user context are required to load review context.");
+  }
+
+  const result = await getPool().query<{ context: Record<string, unknown>; updated_at: string }>(
+    `select context, updated_at::text
+       from batch_review_contexts
+      where organization_id = $1 and batch_id = $2 and user_id = $3`,
+    [organizationId, batchId, userId],
+  );
+
+  if (!result.rows[0]) {
+    return sendJson(res, 200, null);
+  }
+
+  sendJson(res, 200, { context: result.rows[0].context, updatedAt: result.rows[0].updated_at });
+}
+
+async function handleUpsertReviewContext(req: IncomingMessage, res: ServerResponse, batchId: string) {
+  const input = await parseJson(req);
+  const organizationId = String(input.organizationId ?? "");
+  const userId = String(input.userId ?? "");
+  const context = (input.context ?? {}) as Record<string, unknown>;
+
+  if (!organizationId || !userId) {
+    return sendError(res, 400, "MISSING_CONTEXT", "Organization and user context are required to save review context.");
+  }
+
+  await getPool().query(
+    `insert into batch_review_contexts (organization_id, batch_id, user_id, context)
+     values ($1, $2, $3, $4::jsonb)
+     on conflict (organization_id, batch_id, user_id) do update set
+       context = excluded.context,
+       updated_at = now()
+     where batch_review_contexts.context is distinct from excluded.context`,
+    [organizationId, batchId, userId, JSON.stringify(context)],
+  );
+
+  sendJson(res, 200, { ok: true });
+}
+
 async function routeApi(req: IncomingMessage, res: ServerResponse) {
   await ensureSchema();
 
@@ -2251,6 +2309,16 @@ async function routeApi(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === "POST" && readinessEvaluateMatch) {
     return handleEvaluateReadiness(req, res, readinessEvaluateMatch[1]);
+  }
+
+  const reviewContextMatch = pathname.match(/^\/api\/batches\/([^/]+)\/review-context$/);
+
+  if (req.method === "GET" && reviewContextMatch) {
+    return handleGetReviewContext(req, res, reviewContextMatch[1]);
+  }
+
+  if (req.method === "POST" && reviewContextMatch) {
+    return handleUpsertReviewContext(req, res, reviewContextMatch[1]);
   }
 
   const correctionMatch = pathname.match(/^\/api\/batches\/([^/]+)\/rows\/([^/]+)\/corrections$/);

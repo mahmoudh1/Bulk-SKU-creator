@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OrganizationProvider } from "@/app/organizations/OrganizationProvider";
 import { AppRoutes } from "@/app/routes/route-config";
-import { evaluateBatchReadiness } from "@/lib/api-client/batches";
+import { evaluateBatchReadiness, saveBatchReviewContext } from "@/lib/api-client/batches";
 import { clearLocalIntakeData, createTestBatch, testOrganizationId, uploadTestImage } from "./intake-test-helpers";
 
 const clerkState = vi.hoisted(() => ({
@@ -41,11 +41,11 @@ vi.mock("@clerk/clerk-react", () => ({
   useOrganizationList: () => orgListState,
 }));
 
-function renderTriageRoute(batchId: string) {
+function renderTriageRoute(batchId: string, search = "") {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
       <OrganizationProvider>
-        <MemoryRouter initialEntries={[`/batches/${batchId}/review`]}>
+        <MemoryRouter initialEntries={[`/batches/${batchId}/review${search}`]}>
           <AppRoutes />
         </MemoryRouter>
       </OrganizationProvider>
@@ -98,6 +98,52 @@ describe("triage workspace", () => {
     fireEvent.change(screen.getByPlaceholderText(/row id, sku, product name/i), { target: { value: "sku-1" } });
     expect(screen.getByText("src-row-1")).toBeInTheDocument();
     expect(screen.queryByText("src-row-2")).not.toBeInTheDocument();
+  });
+
+  it("preserves URL-driven filters and selected row when navigating to row detail and back", async () => {
+    clearLocalIntakeData();
+    const asset = await uploadTestImage("lamp.jpg");
+    const batch = await createTestBatch(
+      "triage.csv",
+      `sku,name,brand,image_id\nsku-1,Lamp,Acme,${asset.image_id}\nsku-2,Chair,Acme,img_missing_chair`,
+    );
+
+    await evaluateBatchReadiness({ batchId: batch.batchId, organizationId: testOrganizationId });
+
+    renderTriageRoute(batch.batchId, "?q=chair&readiness=NEEDS_INPUT&sort=updated&row=src-row-2");
+
+    const searchInput = await screen.findByPlaceholderText(/row id, sku, product name/i);
+    expect(searchInput).toHaveValue("chair");
+    expect(screen.getByRole("combobox", { name: /sort/i })).toHaveValue("updated");
+    expect(screen.queryByText("src-row-1")).not.toBeInTheDocument();
+    expect(screen.getByText("src-row-2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: /open full row inspector/i }));
+    expect(await screen.findByRole("heading", { name: /source facts/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: /back to triage/i }));
+
+    expect(await screen.findByPlaceholderText(/row id, sku, product name/i)).toHaveValue("chair");
+    expect(screen.getByRole("combobox", { name: /sort/i })).toHaveValue("updated");
+    expect(screen.getByText("src-row-2")).toBeInTheDocument();
+  });
+
+  it("restores last saved review context when returning to a batch without query params", async () => {
+    clearLocalIntakeData();
+    const asset = await uploadTestImage("lamp.jpg");
+    const batch = await createTestBatch("triage.csv", `sku,name,brand,image_id\nsku-1,Lamp,Acme,${asset.image_id}`);
+    await evaluateBatchReadiness({ batchId: batch.batchId, organizationId: testOrganizationId });
+
+    await saveBatchReviewContext({
+      batchId: batch.batchId,
+      organizationId: testOrganizationId,
+      userId: "user_1",
+      context: { q: "sku-1", row: "src-row-1" },
+    });
+
+    renderTriageRoute(batch.batchId);
+
+    expect(await screen.findByPlaceholderText(/row id, sku, product name/i)).toHaveValue("sku-1");
+    expect(screen.getByText("src-row-1")).toBeInTheDocument();
   });
 
   it("does not fabricate rows for unknown batch IDs", async () => {
