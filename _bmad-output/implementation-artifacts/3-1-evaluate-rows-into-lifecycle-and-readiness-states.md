@@ -1,6 +1,6 @@
 # Story 3.1: Evaluate Rows into Lifecycle and Readiness States
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,25 +19,25 @@ so that I can understand where the batch stands before submission work begins.
 
 ## Tasks / Subtasks
 
-- [ ] Add persisted readiness evaluation data to the local API schema (AC: 1, 2, 4)
-  - [ ] Extend `apps/web/server/bulk-sku-api.ts` schema setup with the minimum Neon-backed fields/tables needed for row readiness results, row lifecycle events, and validation evidence.
-  - [ ] Keep tenant scoping on `organization_id` and batch scoping on `batch_id`.
-  - [ ] Preserve existing `batch_intake_reviews.review` JSON compatibility so Epic 2 intake still works.
-- [ ] Define readiness/lifecycle DTOs in the batch API client (AC: 1, 2)
-  - [ ] Add explicit readiness states: `READY`, `READY_WITH_AUGMENTATION`, `NEEDS_INPUT`, `NOT_ENOUGH_DATA`, `BLOCKED_FOR_REVIEW`.
-  - [ ] Add explicit lifecycle stages for the Epic 3 boundary, at minimum intake-ready, readiness-evaluated, needs-correction, and ready-for-submission-prep.
-  - [ ] Include row revision, issue summaries, evidence references, and updated timestamps in DTOs.
-- [ ] Implement readiness evaluation endpoint(s) (AC: 1, 2, 3, 4)
-  - [ ] Add an API endpoint to evaluate a batch's existing intake rows into readiness rows/results.
-  - [ ] Add an API endpoint or query path to fetch evaluated readiness data by batch and organization.
-  - [ ] Ensure repeated evaluation for the same unchanged intake row produces stable row IDs, lifecycle stage, readiness state, and issue output.
-- [ ] Use R2-backed image evidence from Epic 2 (AC: 4)
-  - [ ] Reference existing `resolvedAssets.previewRef` and `imageId` values from intake rows.
-  - [ ] Do not trust browser-local image data as readiness evidence outside test fallback mode.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Cover deterministic evaluation for a clean row and a row with unresolved intake/image issues.
-  - [ ] Cover persisted fetch after evaluation.
-  - [ ] Cover R2 image evidence references in the readiness result.
+- [x] Add persisted readiness evaluation data to the local API schema (AC: 1, 2, 4)
+  - [x] Extend `apps/web/server/bulk-sku-api.ts` schema setup with the minimum Neon-backed fields/tables needed for row readiness results, row lifecycle events, and validation evidence.
+  - [x] Keep tenant scoping on `organization_id` and batch scoping on `batch_id`.
+  - [x] Preserve existing `batch_intake_reviews.review` JSON compatibility so Epic 2 intake still works.
+- [x] Define readiness/lifecycle DTOs in the batch API client (AC: 1, 2)
+  - [x] Add explicit readiness states: `READY`, `READY_WITH_AUGMENTATION`, `NEEDS_INPUT`, `NOT_ENOUGH_DATA`, `BLOCKED_FOR_REVIEW`.
+  - [x] Add explicit lifecycle stages for the Epic 3 boundary, at minimum intake-ready, readiness-evaluated, needs-correction, and ready-for-submission-prep.
+  - [x] Include row revision, issue summaries, evidence references, and updated timestamps in DTOs.
+- [x] Implement readiness evaluation endpoint(s) (AC: 1, 2, 3, 4)
+  - [x] Add an API endpoint to evaluate a batch's existing intake rows into readiness rows/results.
+  - [x] Add an API endpoint or query path to fetch evaluated readiness data by batch and organization.
+  - [x] Ensure repeated evaluation for the same unchanged intake row produces stable row IDs, lifecycle stage, readiness state, and issue output.
+- [x] Use R2-backed image evidence from Epic 2 (AC: 4)
+  - [x] Reference existing `resolvedAssets.previewRef` and `imageId` values from intake rows.
+  - [x] Do not trust browser-local image data as readiness evidence outside test fallback mode.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Cover deterministic evaluation for a clean row and a row with unresolved intake/image issues.
+  - [x] Cover persisted fetch after evaluation.
+  - [x] Cover R2 image evidence references in the readiness result.
 
 ## Dev Notes
 
@@ -95,13 +95,26 @@ so that I can understand where the batch stands before submission work begins.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added persisted readiness evaluation schema, lifecycle tracking, and validation evidence tables in the local API server.
+- Added readiness evaluation and fetch endpoints with deterministic upserts keyed on row revision.
+- Added readiness/lifecycle DTOs and client functions with Vitest-only localStorage fallback.
+- Added focused readiness evaluation tests (deterministic behavior, persisted fetch, and image preview evidence).
+- Validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/server/bulk-sku-api.ts
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/test/readiness-evaluation.test.ts
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-1-evaluate-rows-into-lifecycle-and-readiness-states.md
+
+## Change Log
+
+- 2026-05-03: Implemented persisted readiness evaluation contract (schema + endpoints + client DTOs + tests).

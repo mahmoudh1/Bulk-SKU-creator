@@ -1,6 +1,6 @@
 # Story 3.6: Correct Rows In-Workflow and Revalidate Them
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,26 +19,26 @@ so that I can move blocked rows toward readiness without losing context.
 
 ## Tasks / Subtasks
 
-- [ ] Add row correction mutation model (AC: 1)
-  - [ ] Support a scoped set of editable fields from current persisted row data: title/name, brand, identifier/exemption, required attributes, product type where already supported, and image ID references.
-  - [ ] Persist corrections with row revision, source row identity, actor/user ID where available, and timestamp.
-  - [ ] Do not mutate original source identity fields.
-- [ ] Implement revalidation after correction (AC: 2, 3, 4)
-  - [ ] Add API endpoint/mutation for row correction and revalidation.
-  - [ ] Re-run deterministic readiness/validation rules from Stories 3.1-3.5 on the corrected row revision.
-  - [ ] Return row outcome, remaining issues, new revision, and updated readiness state.
-- [ ] Wire row detail correction UI (AC: 1, 2, 3)
-  - [ ] Add editable controls only for supported fields.
-  - [ ] Show mutation pending, success, and failure states.
-  - [ ] Preserve current batch/row route context after mutation.
-- [ ] Resolve corrected image IDs through server state (AC: 4)
-  - [ ] Check corrected image IDs against organization-scoped `image_assets`.
-  - [ ] Treat missing, forbidden, or unreadable R2 assets as row blockers.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Correction creates a new revision and preserves source row identity.
-  - [ ] Revalidation clears resolved blockers.
-  - [ ] Remaining blockers remain visible.
-  - [ ] Bad image ID remains blocked.
+- [x] Add row correction mutation model (AC: 1)
+  - [x] Support a scoped set of editable fields from current persisted row data: title/name, brand, identifier/exemption, required attributes, product type where already supported, and image ID references.
+  - [x] Persist corrections with row revision, source row identity, actor/user ID where available, and timestamp.
+  - [x] Do not mutate original source identity fields.
+- [x] Implement revalidation after correction (AC: 2, 3, 4)
+  - [x] Add API endpoint/mutation for row correction and revalidation.
+  - [x] Re-run deterministic readiness/validation rules from Stories 3.1-3.5 on the corrected row revision.
+  - [x] Return row outcome, remaining issues, new revision, and updated readiness state.
+- [x] Wire row detail correction UI (AC: 1, 2, 3)
+  - [x] Add editable controls only for supported fields.
+  - [x] Show mutation pending, success, and failure states.
+  - [x] Preserve current batch/row route context after mutation.
+- [x] Resolve corrected image IDs through server state (AC: 4)
+  - [x] Check corrected image IDs against organization-scoped `image_assets`.
+  - [x] Treat missing, forbidden, or unreadable R2 assets as row blockers.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Correction creates a new revision and preserves source row identity.
+  - [x] Revalidation clears resolved blockers.
+  - [x] Remaining blockers remain visible.
+  - [x] Bad image ID remains blocked.
 
 ## Dev Notes
 
@@ -100,13 +100,26 @@ so that I can move blocked rows toward readiness without losing context.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added row correction + revalidation mutation contract (server endpoint + local fallback) that bumps row revision while preserving row identity.
+- Wired RowInspector correction controls (supported fields only) with pending/error states and query invalidation to refresh readiness/row detail in-place.
+- Ensured corrected image IDs are re-resolved against organization-scoped image assets; unknown IDs remain blocked.
+- Added focused tests for revision bumps, blocker clearing, stale revision handling, and bad image ID behavior; validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/server/bulk-sku-api.ts
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/routes/pages/RowInspector.tsx
+- apps/web/src/test/row-corrections.test.ts
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-6-correct-rows-in-workflow-and-revalidate-them.md
+
+## Change Log
+
+- 2026-05-04: Added row-level corrections and revalidation flow with revisioning, refreshed readiness, and tests.

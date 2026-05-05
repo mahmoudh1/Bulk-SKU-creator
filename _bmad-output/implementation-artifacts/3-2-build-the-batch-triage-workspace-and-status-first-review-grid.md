@@ -1,6 +1,6 @@
 # Story 3.2: Build the Batch Triage Workspace and Status-First Review Grid
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -19,27 +19,27 @@ so that I can triage the highest-priority work quickly.
 
 ## Tasks / Subtasks
 
-- [ ] Replace mock-driven triage data loading (AC: 1, 4)
-  - [ ] Update `apps/web/src/routes/pages/TriageWorkspace.tsx` to load the active `batchId` from the route and active organization from `OrganizationProvider`.
-  - [ ] Fetch readiness rows and summary counts through `apps/web/src/lib/api-client/batches.ts`.
-  - [ ] Show an explicit not-found/error state for unknown batch IDs instead of falling back to prototype rows.
-- [ ] Build status-first summary and priority guidance from server data (AC: 1, 3)
-  - [ ] Derive counts from persisted readiness states.
-  - [ ] Surface highest-priority blockers from server issue summaries.
-  - [ ] Keep submission actions gated when rows are not eligible; do not implement submission itself.
-- [ ] Implement filter and sort behavior (AC: 2, 3)
-  - [ ] Support at minimum readiness-status filter, blocker/warning filter, search by row ID/SKU/product name, and updated-time or status-priority sort.
-  - [ ] Represent active filters in stable UI state and prepare for Story 3.8 URL persistence.
-  - [ ] Preserve text labels for all statuses; do not rely on color alone.
-- [ ] Keep row selection and side preview server-backed (AC: 1, 4)
-  - [ ] Use selected readiness row data from the API result.
-  - [ ] Link to `/batches/:id/rows/:rowId` using actual IDs.
-  - [ ] Remove `prototypeBatchId`, `prototypeRowId`, and `@/data/mock` dependencies from this route.
-- [ ] Add focused tests (AC: 1, 2, 3, 4)
-  - [ ] Cover rendered counts from server/API-client data.
-  - [ ] Cover filters/sorting changing visible rows.
-  - [ ] Cover unknown batch ID does not fabricate rows.
-  - [ ] Cover links preserve actual batch and row IDs.
+- [x] Replace mock-driven triage data loading (AC: 1, 4)
+  - [x] Update `apps/web/src/routes/pages/TriageWorkspace.tsx` to load the active `batchId` from the route and active organization from `OrganizationProvider`.
+  - [x] Fetch readiness rows and summary counts through `apps/web/src/lib/api-client/batches.ts`.
+  - [x] Show an explicit not-found/error state for unknown batch IDs instead of falling back to prototype rows.
+- [x] Build status-first summary and priority guidance from server data (AC: 1, 3)
+  - [x] Derive counts from persisted readiness states.
+  - [x] Surface highest-priority blockers from server issue summaries.
+  - [x] Keep submission actions gated when rows are not eligible; do not implement submission itself.
+- [x] Implement filter and sort behavior (AC: 2, 3)
+  - [x] Support at minimum readiness-status filter, blocker/warning filter, search by row ID/SKU/product name, and updated-time or status-priority sort.
+  - [x] Represent active filters in stable UI state and prepare for Story 3.8 URL persistence.
+  - [x] Preserve text labels for all statuses; do not rely on color alone.
+- [x] Keep row selection and side preview server-backed (AC: 1, 4)
+  - [x] Use selected readiness row data from the API result.
+  - [x] Link to `/batches/:id/rows/:rowId` using actual IDs.
+  - [x] Remove `prototypeBatchId`, `prototypeRowId`, and `@/data/mock` dependencies from this route.
+- [x] Add focused tests (AC: 1, 2, 3, 4)
+  - [x] Cover rendered counts from server/API-client data.
+  - [x] Cover filters/sorting changing visible rows.
+  - [x] Cover unknown batch ID does not fabricate rows.
+  - [x] Cover links preserve actual batch and row IDs.
 
 ## Dev Notes
 
@@ -101,13 +101,27 @@ so that I can triage the highest-priority work quickly.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+SOLO (proprietary)
 
 ### Debug Log References
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Replaced mock-driven triage route data with server-backed readiness evaluation via query layer and active workspace scoping.
+- Implemented status-first summary counts, priority guidance, and submission gating based on persisted readiness state.
+- Added filter/search/sort controls and stable selection/side preview using readiness rows.
+- Extended readiness records to include SKU/product/brand for triage display.
+- Added focused triage workspace tests and validated with `npm run test:web`, `npm run lint:web`, and `npm run build:web`.
 
 ### File List
 
+- apps/web/server/bulk-sku-api.ts
+- apps/web/src/lib/api-client/batches.ts
+- apps/web/src/routes/pages/TriageWorkspace.tsx
+- apps/web/src/test/triage-workspace.test.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-2-build-the-batch-triage-workspace-and-status-first-review-grid.md
+
+## Change Log
+
+- 2026-05-03: Converted triage workspace to server-backed readiness triage (filters/sort/preview + tests).
